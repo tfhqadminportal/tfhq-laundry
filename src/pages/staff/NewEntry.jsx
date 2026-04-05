@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { format } from 'date-fns'
 import {
   Save, Trash2, CheckCircle, ChevronLeft, ChevronRight,
-  Package, Clock, TrendingUp, Users, CalendarClock,
+  Package, Clock, TrendingUp, Users, CalendarClock, Settings,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useRosterForDate } from '@/hooks/useRosterHours'
@@ -22,24 +22,34 @@ const REPAIR_FIELDS = [
   { key: 'fp_inject',      label: 'F&P to Inject' },
 ]
 
-function emptyGownRow()  {
-  return { blue: '', white: '', grey: '', ink: '', holes: '', repair: '' }
-}
-function emptyRepairs()  {
-  return { labelling: '', sleeve_repair: '', general_repair: '', fp_inject: '' }
-}
+// Packed gowns only — ink/holes/repair are now global, not per-building
+function emptyGownRow()   { return { blue: '', white: '', grey: '' } }
+// Global rejects/repairs entered once, then split across buildings by allocation %
+function emptyRejectRow() { return { ink: '', holes: '', repair: '' } }
+function emptyRepairs()   { return { labelling: '', sleeve_repair: '', general_repair: '', fp_inject: '' } }
+
 function emptyState(buildings = []) {
   return {
-    gowns:   Object.fromEntries(buildings.map(b => [b.id, Object.fromEntries(SIZES.map(s => [s, emptyGownRow()]))])),
-    bags:    Object.fromEntries(buildings.map(b => [b.id, ''])),
-    repairs: emptyRepairs(),
+    gowns:        Object.fromEntries(buildings.map(b => [b.id, Object.fromEntries(SIZES.map(s => [s, emptyGownRow()]))])),
+    bags:         Object.fromEntries(buildings.map(b => [b.id, ''])),
+    rejectGowns:  Object.fromEntries(SIZES.map(s => [s, emptyRejectRow()])),
+    repairs:      emptyRepairs(),
   }
+}
+
+// Default equal-split allocation for a list of buildings
+function defaultAlloc(buildings) {
+  if (!buildings.length) return {}
+  const base = Math.floor(100 / buildings.length)
+  const rem  = 100 - base * buildings.length
+  return Object.fromEntries(buildings.map((b, i) => [b.id, base + (i === 0 ? rem : 0)]))
 }
 
 // ─── LocalStorage helpers ──────────────────────────────────────
 const lsSave  = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 const lsLoad  = (k)    => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch { return null } }
 const lsClear = (k)    => { try { localStorage.removeItem(k) } catch {} }
+const allocKey = (cid) => `tfhq-alloc-v1-${cid}`
 
 // ─── Number input ──────────────────────────────────────────────
 function N({ value, onChange, accent, small }) {
@@ -108,31 +118,26 @@ function ProductivityBadge({ total, shiftHours, staffCount, targetRate }) {
   )
 }
 
-// ─── Building card (Mobile) ─────────────────────────────────────
+// ─── Building card (Mobile) — packed gowns only ─────────────────
 function BuildingCard({ building, gowns, bags, onGown, onBag }) {
   const totals = SIZES.reduce((a, s) => {
     const r = gowns[s] || emptyGownRow()
-    a.blue   += +r.blue   || 0
-    a.white  += +r.white  || 0
-    a.grey   += +r.grey   || 0
-    a.ink    += +r.ink    || 0
-    a.holes  += +r.holes  || 0
-    a.repair += +r.repair || 0
+    a.blue  += +r.blue  || 0
+    a.white += +r.white || 0
+    a.grey  += +r.grey  || 0
     return a
-  }, { blue: 0, white: 0, grey: 0, ink: 0, holes: 0, repair: 0 })
+  }, { blue: 0, white: 0, grey: 0 })
 
   const total = totals.blue + totals.white + totals.grey
 
   return (
     <div className="space-y-3">
-      {/* Building header + bags */}
+      {/* Building header + bag count */}
       <div className="flex items-center justify-between bg-navy-700 text-white px-4 py-3 rounded-xl">
         <div className="min-w-0 flex-1 pr-3">
           <p className="font-bold text-base">{building.name}</p>
           {total > 0 && (
-            <p className="text-xs text-navy-300 mt-0.5">
-              {total.toLocaleString()} packed · {totals.ink + totals.holes} rejects · {totals.repair} repairs
-            </p>
+            <p className="text-xs text-navy-300 mt-0.5">{total.toLocaleString()} gowns packed</p>
           )}
         </div>
         <div className="flex-shrink-0 text-right">
@@ -145,132 +150,71 @@ function BuildingCard({ building, gowns, bags, onGown, onBag }) {
             value={bags}
             onChange={e => onBag(e.target.value)}
             className="w-16 h-10 rounded-lg bg-navy-600 border border-navy-500 text-white text-center font-bold focus:outline-none focus:ring-1 focus:ring-gold-400"
+            style={{ fontSize: 16 }}
           />
         </div>
       </div>
 
-      {/* Size rows — two input rows per size: Packed | Issues */}
+      {/* Column headers */}
+      <div className="grid grid-cols-4 gap-2 px-1">
+        <div className="text-xs font-bold text-gray-400 uppercase text-center">Size</div>
+        <div className="text-xs font-bold text-blue-600  text-center">Blue</div>
+        <div className="text-xs font-bold text-gray-500  text-center">White</div>
+        <div className="text-xs font-bold text-gray-500  text-center">Grey</div>
+      </div>
+
+      {/* Size rows — packed gowns only */}
       {SIZES.map((size, si) => {
         const r = gowns[size] || emptyGownRow()
-        const rowTotal = (+r.blue || 0) + (+r.white || 0) + (+r.grey || 0)
         return (
-          <div key={size} className={`rounded-xl overflow-hidden border ${si % 2 === 0 ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
-            {/* Size label bar */}
-            <div className="flex items-center justify-between px-3 py-1.5 bg-navy-50 border-b border-navy-100">
-              <span className="font-bold text-navy-700 text-sm tracking-wide">{size}</span>
-              {rowTotal > 0 && (
-                <span className="text-xs font-semibold text-navy-600 bg-navy-100 px-2 py-0.5 rounded-full">
-                  {rowTotal} packed
-                </span>
-              )}
+          <div key={size} className={`grid grid-cols-4 gap-2 items-center px-1 py-1 rounded-lg ${si % 2 !== 0 ? 'bg-gray-50' : ''}`}>
+            <div className="flex items-center justify-center">
+              <span className="w-11 h-11 bg-navy-100 text-navy-700 rounded-lg font-bold text-sm flex items-center justify-center">
+                {size}
+              </span>
             </div>
-
-            <div className="px-3 pt-2 pb-3 space-y-2">
-              {/* Packed gowns */}
-              <div>
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Packed Gowns</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-blue-600 mb-1 text-center">Blue</label>
-                    <N value={r.blue}  onChange={v => onGown(size, 'blue',  v)} accent="blue" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1 text-center">White</label>
-                    <N value={r.white} onChange={v => onGown(size, 'white', v)} accent="white" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1 text-center">Grey</label>
-                    <N value={r.grey}  onChange={v => onGown(size, 'grey',  v)} accent="grey" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Issues */}
-              <div>
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Issues</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs font-semibold text-red-500 mb-1 text-center">Ink Stain</label>
-                    <N value={r.ink}    onChange={v => onGown(size, 'ink',    v)} accent="ink" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-orange-500 mb-1 text-center">Holes</label>
-                    <N value={r.holes}  onChange={v => onGown(size, 'holes',  v)} accent="holes" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-amber-500 mb-1 text-center">Repair</label>
-                    <N value={r.repair} onChange={v => onGown(size, 'repair', v)} accent="repair" />
-                  </div>
-                </div>
-              </div>
-            </div>
+            <N value={r.blue}  onChange={v => onGown(size, 'blue',  v)} accent="blue" />
+            <N value={r.white} onChange={v => onGown(size, 'white', v)} accent="white" />
+            <N value={r.grey}  onChange={v => onGown(size, 'grey',  v)} accent="grey" />
           </div>
         )
       })}
 
-      {/* Building totals summary */}
-      <div className="bg-navy-50 rounded-xl p-4 border border-navy-100">
-        <p className="text-xs font-bold text-navy-600 uppercase tracking-wider mb-3">Building Totals</p>
-        <div className="grid grid-cols-3 gap-y-3 gap-x-2 text-center text-xs mb-3">
-          <div>
-            <p className="font-bold text-blue-700 text-lg leading-none">{totals.blue || '—'}</p>
-            <p className="text-gray-400 mt-0.5">Blue</p>
-          </div>
-          <div>
-            <p className="font-bold text-gray-700 text-lg leading-none">{totals.white || '—'}</p>
-            <p className="text-gray-400 mt-0.5">White</p>
-          </div>
-          <div>
-            <p className="font-bold text-gray-600 text-lg leading-none">{totals.grey || '—'}</p>
-            <p className="text-gray-400 mt-0.5">Grey</p>
-          </div>
-          <div>
-            <p className="font-bold text-red-600 text-lg leading-none">{totals.ink || '—'}</p>
-            <p className="text-gray-400 mt-0.5">Ink Stain</p>
-          </div>
-          <div>
-            <p className="font-bold text-orange-600 text-lg leading-none">{totals.holes || '—'}</p>
-            <p className="text-gray-400 mt-0.5">Holes</p>
-          </div>
-          <div>
-            <p className="font-bold text-amber-600 text-lg leading-none">{totals.repair || '—'}</p>
-            <p className="text-gray-400 mt-0.5">Repair</p>
-          </div>
+      {/* Totals row */}
+      {total > 0 && (
+        <div className="grid grid-cols-4 gap-2 px-1 bg-navy-50 rounded-xl py-2.5 border border-navy-100">
+          <div className="text-xs font-bold text-navy-700 text-center flex items-center justify-center">Total</div>
+          <div className="text-sm font-bold text-blue-700  text-center">{totals.blue  || '—'}</div>
+          <div className="text-sm font-bold text-gray-700  text-center">{totals.white || '—'}</div>
+          <div className="text-sm font-bold text-gray-600  text-center">{totals.grey  || '—'}</div>
         </div>
-        <div className="border-t border-navy-200 pt-3 flex items-center justify-between">
-          <span className="text-sm font-semibold text-navy-600">Total Packed</span>
-          <span className="text-xl font-bold text-navy-700">{total.toLocaleString()}</span>
-        </div>
-      </div>
+      )}
     </div>
   )
 }
 
-// ─── Desktop table ──────────────────────────────────────────────
+// ─── Desktop table — packed gowns only ─────────────────────────
 function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
   const bldgTotals = (bid) => SIZES.reduce((a, s) => {
     const r = (gowns[bid] || {})[s] || emptyGownRow()
-    a.blue   += +r.blue   || 0; a.white  += +r.white  || 0; a.grey   += +r.grey   || 0
-    a.ink    += +r.ink    || 0; a.holes  += +r.holes  || 0; a.repair += +r.repair || 0
+    a.blue  += +r.blue  || 0; a.white += +r.white || 0; a.grey += +r.grey || 0
     return a
-  }, { blue: 0, white: 0, grey: 0, ink: 0, holes: 0, repair: 0 })
+  }, { blue: 0, white: 0, grey: 0 })
 
   const rowTotals = (size) => buildings.reduce((a, b) => {
     const r = (gowns[b.id] || {})[size] || emptyGownRow()
-    a.blue   += +r.blue   || 0; a.white  += +r.white  || 0; a.grey   += +r.grey   || 0
-    a.ink    += +r.ink    || 0; a.holes  += +r.holes  || 0; a.repair += +r.repair || 0
+    a.blue  += +r.blue  || 0; a.white += +r.white || 0; a.grey += +r.grey || 0
     return a
-  }, { blue: 0, white: 0, grey: 0, ink: 0, holes: 0, repair: 0 })
+  }, { blue: 0, white: 0, grey: 0 })
 
   const grand = buildings.reduce((a, b) => {
     const t = bldgTotals(b.id)
     a.blue += t.blue; a.white += t.white; a.grey += t.grey
-    a.ink  += t.ink;  a.holes += t.holes; a.repair += t.repair
     return a
-  }, { blue: 0, white: 0, grey: 0, ink: 0, holes: 0, repair: 0 })
+  }, { blue: 0, white: 0, grey: 0 })
 
-  // 6 cols per building: Blue | White | Grey | Ink | Holes | Repair
-  const minW = Math.max(900, buildings.length * 370 + 160)
+  // 3 cols per building: Blue | White | Grey
+  const minW = Math.max(600, buildings.length * 220 + 160)
 
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -285,11 +229,11 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
               const t = bldgTotals(b.id)
               const total = t.blue + t.white + t.grey
               return (
-                <th key={b.id} colSpan={6}
+                <th key={b.id} colSpan={3}
                   className={`px-3 py-2 border-l-2 border-navy-900 text-white text-center ${bi % 2 === 0 ? 'bg-navy-700' : 'bg-navy-600'}`}>
                   <div className="flex items-center justify-center gap-3 flex-wrap">
                     <span className="font-bold text-sm">{b.name}</span>
-                    {total > 0 && <span className="text-xs text-navy-300">{total.toLocaleString()} gowns</span>}
+                    {total > 0 && <span className="text-xs text-navy-300">{total.toLocaleString()} packed</span>}
                     <span className="flex items-center gap-1.5 ml-2">
                       <Package size={12} className="text-navy-300" />
                       <span className="text-xs text-navy-300">{b.bag_color || 'Bags'}:</span>
@@ -305,40 +249,34 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
               )
             })}
             {/* Grand total header */}
-            <th colSpan={5} className="px-3 py-2 border-l-2 border-navy-500 text-white text-center text-xs font-bold whitespace-nowrap"
+            <th colSpan={3} className="px-3 py-2 border-l-2 border-navy-500 text-white text-center text-xs font-bold whitespace-nowrap"
               style={{ background: '#06111e' }}>
               ALL TOTALS
             </th>
           </tr>
           {/* Row 2: Sub-column labels */}
           <tr>
-            {buildings.map((b, bi) =>
+            {buildings.map((b) =>
               [
-                { lbl: 'Blue',   txt: 'text-blue-700',   bg: 'bg-blue-50'   },
-                { lbl: 'White',  txt: 'text-gray-600',   bg: 'bg-gray-50'   },
-                { lbl: 'Grey',   txt: 'text-gray-500',   bg: 'bg-gray-100'  },
-                { lbl: 'Ink',    txt: 'text-red-600',    bg: 'bg-red-50'    },
-                { lbl: 'Holes',  txt: 'text-orange-600', bg: 'bg-orange-50' },
-                { lbl: 'Repair', txt: 'text-amber-600',  bg: 'bg-amber-50'  },
+                { lbl: 'Blue',  txt: 'text-blue-700', bg: 'bg-blue-50'  },
+                { lbl: 'White', txt: 'text-gray-600', bg: 'bg-gray-50'  },
+                { lbl: 'Grey',  txt: 'text-gray-500', bg: 'bg-gray-100' },
               ].map(({ lbl, txt, bg }, ci) => (
                 <th key={`${b.id}-${lbl}`}
                   className={`px-1 py-1.5 text-center text-xs font-semibold border-b border-gray-200 ${txt} ${bg}
-                    ${ci === 0 ? 'border-l-2 border-l-navy-700' : ''} ${ci === 5 ? 'border-r-2 border-r-navy-700' : ''}`}
-                  style={{ minWidth: 52 }}>
+                    ${ci === 0 ? 'border-l-2 border-l-navy-700' : ''} ${ci === 2 ? 'border-r-2 border-r-navy-700' : ''}`}
+                  style={{ minWidth: 60 }}>
                   {lbl}
                 </th>
               ))
             )}
-            {/* Grand total sub-columns */}
             {[
-              { lbl: 'Blue',    txt: 'text-blue-700' },
-              { lbl: 'White',   txt: 'text-gray-600' },
-              { lbl: 'Grey',    txt: 'text-gray-500' },
-              { lbl: 'Rejects', txt: 'text-red-600'  },
-              { lbl: 'Repairs', txt: 'text-amber-600'},
+              { lbl: 'Blue',  txt: 'text-blue-700' },
+              { lbl: 'White', txt: 'text-gray-600' },
+              { lbl: 'Grey',  txt: 'text-gray-500' },
             ].map(({ lbl, txt }) => (
               <th key={lbl} className={`px-2 py-1.5 text-center text-xs font-semibold border-b border-gray-200 border-l border-l-gray-300 ${txt}`}
-                style={{ background: '#f0f4fa', minWidth: 52 }}>
+                style={{ background: '#f0f4fa', minWidth: 60 }}>
                 {lbl}
               </th>
             ))}
@@ -355,28 +293,22 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
                     {size}
                   </span>
                 </td>
-                {buildings.map((b, bi) => {
+                {buildings.map((b) => {
                   const r = (gowns[b.id] || {})[size] || emptyGownRow()
                   return [
-                    { field: 'blue',   acc: 'blue',   border: 'border-l-2 border-l-gray-300' },
-                    { field: 'white',  acc: 'white',  border: '' },
-                    { field: 'grey',   acc: 'grey',   border: '' },
-                    { field: 'ink',    acc: 'ink',    border: '' },
-                    { field: 'holes',  acc: 'holes',  border: '' },
-                    { field: 'repair', acc: 'repair', border: 'border-r-2 border-r-gray-300' },
+                    { field: 'blue',  acc: 'blue',  border: 'border-l-2 border-l-gray-300' },
+                    { field: 'white', acc: 'white', border: '' },
+                    { field: 'grey',  acc: 'grey',  border: 'border-r-2 border-r-gray-300' },
                   ].map(({ field, acc, border }) => (
                     <td key={`${b.id}-${field}`} className={`px-1 py-1.5 ${border}`}>
                       <N value={r[field]} onChange={v => onGown(b.id, size, field, v)} accent={acc} small />
                     </td>
                   ))
                 })}
-                {/* Row totals */}
                 {[
-                  { v: rt.blue,              cls: 'text-blue-700' },
-                  { v: rt.white,             cls: 'text-gray-700' },
-                  { v: rt.grey,              cls: 'text-gray-600' },
-                  { v: rt.ink + rt.holes,    cls: 'text-red-600'  },
-                  { v: rt.repair,            cls: 'text-amber-600'},
+                  { v: rt.blue,  cls: 'text-blue-700' },
+                  { v: rt.white, cls: 'text-gray-700' },
+                  { v: rt.grey,  cls: 'text-gray-600' },
                 ].map(({ v, cls }, i) => (
                   <td key={i} className={`px-2 py-1.5 text-center text-sm font-bold border-l border-l-gray-200 ${cls}`}
                     style={{ background: '#f0f4fa' }}>
@@ -393,26 +325,21 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
             {buildings.map(b => {
               const t = bldgTotals(b.id)
               return [
-                { v: t.blue,   cls: 'text-blue-200'   },
-                { v: t.white,  cls: 'text-gray-100'   },
-                { v: t.grey,   cls: 'text-gray-300'   },
-                { v: t.ink,    cls: 'text-red-300'    },
-                { v: t.holes,  cls: 'text-orange-300' },
-                { v: t.repair, cls: 'text-amber-300'  },
+                { v: t.blue,  cls: 'text-blue-200' },
+                { v: t.white, cls: 'text-gray-100' },
+                { v: t.grey,  cls: 'text-gray-300' },
               ].map(({ v, cls }, i) => (
                 <td key={`${b.id}-tot-${i}`}
                   className={`px-1 py-2.5 text-center text-sm font-bold border-navy-700
-                    ${i === 0 ? 'border-l-2' : ''} ${i === 5 ? 'border-r-2' : 'border-r border-r-navy-700'} ${cls}`}>
+                    ${i === 0 ? 'border-l-2' : ''} ${i === 2 ? 'border-r-2' : 'border-r border-r-navy-700'} ${cls}`}>
                   {v || '—'}
                 </td>
               ))
             })}
             {[
-              { v: grand.blue,              cls: 'text-blue-200'  },
-              { v: grand.white,             cls: 'text-white'     },
-              { v: grand.grey,              cls: 'text-gray-300'  },
-              { v: grand.ink + grand.holes, cls: 'text-red-300'   },
-              { v: grand.repair,            cls: 'text-amber-300' },
+              { v: grand.blue,  cls: 'text-blue-200' },
+              { v: grand.white, cls: 'text-white'    },
+              { v: grand.grey,  cls: 'text-gray-300' },
             ].map(({ v, cls }, i) => (
               <td key={`grand-${i}`} className={`px-2 py-2.5 text-center text-sm font-bold border-l border-l-navy-600 ${cls}`}
                 style={{ background: '#06111e' }}>
@@ -422,16 +349,147 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
           </tr>
         </tbody>
       </table>
+    </div>
+  )
+}
 
-      {/* Legend */}
-      <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-4 text-xs text-gray-500">
-        <span><span className="font-semibold text-blue-600">Blue</span> = Blue Gowns</span>
-        <span><span className="font-semibold text-gray-600">White</span> = White Gowns</span>
-        <span><span className="font-semibold text-gray-500">Grey</span> = Grey Gowns</span>
-        <span><span className="font-semibold text-red-500">Ink</span> = Ink Stain</span>
-        <span><span className="font-semibold text-orange-500">Holes</span> = Large/Burnt Holes</span>
-        <span><span className="font-semibold text-amber-500">Repair</span> = To Repair</span>
+// ─── Rejects & Repairs section ─────────────────────────────────
+// Ink stain / holes / repair are entered as site-wide totals (per size),
+// then automatically allocated across buildings by configurable percentages.
+function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, onAllocChange }) {
+  const [showEdit, setShowEdit] = useState(false)
+
+  const grandTotals = SIZES.reduce((a, s) => {
+    const r = rejectGowns[s] || emptyRejectRow()
+    a.ink    += +r.ink    || 0
+    a.holes  += +r.holes  || 0
+    a.repair += +r.repair || 0
+    return a
+  }, { ink: 0, holes: 0, repair: 0 })
+  const hasAny = grandTotals.ink + grandTotals.holes + grandTotals.repair > 0
+
+  const totalAllocPct = Object.values(allocPcts).reduce((s, v) => s + (+v || 0), 0)
+  const allocValid    = Math.round(totalAllocPct) === 100
+
+  return (
+    <div className="card p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-gray-800">Rejects &amp; Repairs</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Enter totals by size — auto-allocated across buildings
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowEdit(e => !e)}
+          className="btn-secondary btn-sm flex items-center gap-1.5"
+        >
+          <Settings size={13} />
+          {showEdit ? 'Done' : 'Allocation %'}
+        </button>
       </div>
+
+      {/* Allocation editor */}
+      {showEdit && (
+        <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
+          <p className="text-xs font-semibold text-gray-600 mb-1">
+            Distribution across buildings — must total 100%
+          </p>
+          {buildings.map(b => (
+            <div key={b.id} className="flex items-center gap-3">
+              <span className="flex-1 text-sm font-medium text-gray-700">{b.name}</span>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number" min="0" max="100" inputMode="numeric"
+                  value={allocPcts[b.id] ?? ''}
+                  onChange={e => onAllocChange(b.id, e.target.value)}
+                  className="w-16 h-10 rounded-lg border text-center text-sm font-bold focus:outline-none focus:ring-1 focus:ring-navy-500
+                    border-gray-300 bg-white text-gray-900"
+                  style={{ fontSize: 16 }}
+                />
+                <span className="text-sm font-semibold text-gray-500">%</span>
+              </div>
+            </div>
+          ))}
+          <div className={`flex items-center justify-between pt-2 border-t border-gray-200 text-sm font-semibold ${allocValid ? 'text-green-600' : 'text-red-500'}`}>
+            <span>Total</span>
+            <span>{totalAllocPct}% {allocValid ? '✓' : '— must equal 100%'}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Per-size reject/repair inputs */}
+      <div className="space-y-2">
+        {/* Column headers */}
+        <div className="grid grid-cols-4 gap-2 px-1">
+          <div className="text-xs font-bold text-gray-400 uppercase text-center">Size</div>
+          <div className="text-xs font-bold text-red-500    text-center">Ink Stain</div>
+          <div className="text-xs font-bold text-orange-500 text-center">Holes</div>
+          <div className="text-xs font-bold text-amber-500  text-center">Repair</div>
+        </div>
+
+        {SIZES.map((size, si) => {
+          const r = rejectGowns[size] || emptyRejectRow()
+          return (
+            <div key={size} className={`grid grid-cols-4 gap-2 items-center px-1 py-1 rounded-lg ${si % 2 !== 0 ? 'bg-gray-50' : ''}`}>
+              <div className="flex items-center justify-center">
+                <span className="w-11 h-11 bg-navy-100 text-navy-700 rounded-lg font-bold text-sm flex items-center justify-center">
+                  {size}
+                </span>
+              </div>
+              <N value={r.ink}    onChange={v => onReject(size, 'ink',    v)} accent="ink" />
+              <N value={r.holes}  onChange={v => onReject(size, 'holes',  v)} accent="holes" />
+              <N value={r.repair} onChange={v => onReject(size, 'repair', v)} accent="repair" />
+            </div>
+          )
+        })}
+
+        {/* Grand totals row */}
+        {hasAny && (
+          <div className="grid grid-cols-4 gap-2 px-1 bg-red-50 rounded-xl py-2.5 border border-red-100">
+            <div className="text-xs font-bold text-red-700 text-center flex items-center justify-center">Total</div>
+            <div className="text-sm font-bold text-red-700    text-center">{grandTotals.ink    || '—'}</div>
+            <div className="text-sm font-bold text-orange-700 text-center">{grandTotals.holes  || '—'}</div>
+            <div className="text-sm font-bold text-amber-700  text-center">{grandTotals.repair || '—'}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Auto-allocation preview */}
+      {hasAny && buildings.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            Auto-allocated to buildings
+          </p>
+          {buildings.map(b => {
+            const pct  = (allocPcts[b.id] || 0) / 100
+            const ink  = Math.round(grandTotals.ink    * pct)
+            const holes= Math.round(grandTotals.holes  * pct)
+            const rep  = Math.round(grandTotals.repair * pct)
+            if (!ink && !holes && !rep) return null
+            return (
+              <div key={b.id} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-gray-800">{b.name}</p>
+                  <p className="text-xs text-gray-400">{allocPcts[b.id] || 0}% allocation</p>
+                </div>
+                <div className="flex gap-3 text-xs font-semibold">
+                  {ink   > 0 && <span className="text-red-600">{ink} ink</span>}
+                  {holes > 0 && <span className="text-orange-600">{holes} holes</span>}
+                  {rep   > 0 && <span className="text-amber-600">{rep} repairs</span>}
+                </div>
+              </div>
+            )
+          })}
+          {!allocValid && (
+            <p className="text-xs text-red-500 text-center">
+              ⚠ Allocation % must total 100% before submitting
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -484,11 +542,13 @@ export default function StaffNewEntry() {
   const [clientId, setClient]         = useState('')
   const [gowns, setGowns]             = useState({})
   const [bags, setBags]               = useState({})
+  const [rejectGowns, setRejectGowns] = useState(Object.fromEntries(SIZES.map(s => [s, emptyRejectRow()])))
+  const [allocPcts, setAllocPcts]     = useState({})  // { buildingId: number }
   const [repairs, setRepairs]         = useState(emptyRepairs())
   const [notes, setNotes]             = useState('')
   const [shiftHours, setShiftHrs]     = useState('')
   const [staffOnShift, setStaffN]     = useState('')
-  const [rosterFilled, setRosterFilled] = useState(false)   // track if we auto-filled
+  const [rosterFilled, setRosterFilled] = useState(false)
   const [activeIdx, setActiveIdx]     = useState(0)
   const [done, setDone]               = useState(false)
   const initialized = useRef(false)
@@ -512,13 +572,14 @@ export default function StaffNewEntry() {
     initialized.current = true
     const draft = lsLoad(STORAGE_KEY)
     if (draft) {
-      if (draft.date)        setDate(draft.date)
-      if (draft.clientId)    setClient(draft.clientId)
-      if (draft.gowns)       setGowns(draft.gowns)
-      if (draft.bags)        setBags(draft.bags)
-      if (draft.repairs)     setRepairs(draft.repairs)
-      if (draft.notes)       setNotes(draft.notes)
-      if (draft.shiftHours)  setShiftHrs(draft.shiftHours)
+      if (draft.date)         setDate(draft.date)
+      if (draft.clientId)     setClient(draft.clientId)
+      if (draft.gowns)        setGowns(draft.gowns)
+      if (draft.bags)         setBags(draft.bags)
+      if (draft.rejectGowns)  setRejectGowns(draft.rejectGowns)
+      if (draft.repairs)      setRepairs(draft.repairs)
+      if (draft.notes)        setNotes(draft.notes)
+      if (draft.shiftHours)   setShiftHrs(draft.shiftHours)
       if (draft.staffOnShift) setStaffN(draft.staffOnShift)
       toast('Draft restored', { icon: '📋' })
     }
@@ -542,12 +603,20 @@ export default function StaffNewEntry() {
       buildings.forEach(b => { if (next[b.id] === undefined) next[b.id] = '' })
       return next
     })
+    // Load saved allocation % for this client, or default to equal split
+    const saved = lsLoad(allocKey(clientId))
+    if (saved && Object.keys(saved).length === buildings.length) {
+      setAllocPcts(saved)
+    } else {
+      setAllocPcts(defaultAlloc(buildings))
+    }
   }, [clientId, buildings.map(b => b.id).join()])
 
   // ── Load existing data ──
   useEffect(() => {
     if (!existing.logs.length && !existing.extras) return
     if (existing.logs.length) {
+      // Restore packed gowns per building
       setGowns(prev => {
         const next = { ...prev }
         existing.logs.forEach(log => {
@@ -556,17 +625,32 @@ export default function StaffNewEntry() {
           ;(log.laundry_log_rows || []).forEach(r => {
             if (next[bid][r.size_label] !== undefined) {
               next[bid][r.size_label] = {
-                blue:   r.blue_gowns  || '',
-                white:  r.white_gowns || '',
-                grey:   r.grey_gowns  || '',
-                ink:    r.ink_stain   || '',
-                holes:  r.large_holes || '',
-                repair: r.to_repair   || '',
+                blue:  r.blue_gowns  || '',
+                white: r.white_gowns || '',
+                grey:  r.grey_gowns  || '',
               }
             }
           })
         })
         return next
+      })
+      // Reconstruct global reject/repair totals by summing across all buildings
+      setRejectGowns(() => {
+        const totals = Object.fromEntries(SIZES.map(s => [s, { ink: 0, holes: 0, repair: 0 }]))
+        existing.logs.forEach(log => {
+          ;(log.laundry_log_rows || []).forEach(r => {
+            if (totals[r.size_label]) {
+              totals[r.size_label].ink    += r.ink_stain   || 0
+              totals[r.size_label].holes  += r.large_holes || 0
+              totals[r.size_label].repair += r.to_repair   || 0
+            }
+          })
+        })
+        return Object.fromEntries(Object.entries(totals).map(([s, v]) => [s, {
+          ink:    v.ink    || '',
+          holes:  v.holes  || '',
+          repair: v.repair || '',
+        }]))
       })
     }
     if (existing.extras) {
@@ -602,23 +686,36 @@ export default function StaffNewEntry() {
   // Clear roster-filled flag when date changes so it can re-trigger
   useEffect(() => { setRosterFilled(false) }, [date])
 
-  // ── Persist to localStorage ──
+  // ── Persist draft to localStorage ──
   useEffect(() => {
     if (!clientId) return
-    lsSave(STORAGE_KEY, { date, clientId, gowns, bags, repairs, notes, shiftHours, staffOnShift })
-  }, [date, clientId, gowns, bags, repairs, notes, shiftHours, staffOnShift])
+    lsSave(STORAGE_KEY, { date, clientId, gowns, bags, rejectGowns, repairs, notes, shiftHours, staffOnShift })
+  }, [date, clientId, gowns, bags, rejectGowns, repairs, notes, shiftHours, staffOnShift])
+
+  // ── Persist allocation percentages separately (per client) ──
+  useEffect(() => {
+    if (!clientId || !Object.keys(allocPcts).length) return
+    lsSave(allocKey(clientId), allocPcts)
+  }, [clientId, JSON.stringify(allocPcts)])
 
   // ── Updaters ──
   function setGown(bid, size, field, val) {
     setGowns(p => ({ ...p, [bid]: { ...p[bid], [size]: { ...(p[bid]?.[size] || emptyGownRow()), [field]: val } } }))
   }
-  function setBag(bid, val) { setBags(p => ({ ...p, [bid]: val })) }
+  function setBag(bid, val)    { setBags(p => ({ ...p, [bid]: val })) }
   function setRepair(key, val) { setRepairs(p => ({ ...p, [key]: val })) }
+  function setReject(size, field, val) {
+    setRejectGowns(p => ({ ...p, [size]: { ...(p[size] || emptyRejectRow()), [field]: val } }))
+  }
+  function setAllocPct(bid, val) {
+    setAllocPcts(p => ({ ...p, [bid]: val === '' ? '' : +val }))
+  }
 
   function clearAll() {
     if (!confirm('Clear all data and start fresh?')) return
     const blank = emptyState(buildings)
-    setGowns(blank.gowns); setBags(blank.bags); setRepairs(blank.repairs)
+    setGowns(blank.gowns); setBags(blank.bags)
+    setRejectGowns(blank.rejectGowns); setRepairs(blank.repairs)
     setNotes(''); setShiftHrs(''); setStaffN(''); setDone(false); lsClear(STORAGE_KEY)
     toast.success('Cleared')
   }
@@ -627,17 +724,27 @@ export default function StaffNewEntry() {
   const grand = buildings.reduce((a, b) => {
     SIZES.forEach(s => {
       const r = (gowns[b.id] || {})[s] || emptyGownRow()
-      a.blue   += +r.blue   || 0; a.white  += +r.white  || 0; a.grey   += +r.grey   || 0
-      a.ink    += +r.ink    || 0; a.holes  += +r.holes  || 0; a.repair += +r.repair || 0
+      a.blue  += +r.blue  || 0; a.white += +r.white || 0; a.grey += +r.grey || 0
     })
     return a
-  }, { blue: 0, white: 0, grey: 0, ink: 0, holes: 0, repair: 0 })
-  grand.total       = grand.blue + grand.white + grand.grey
-  grand.rejects     = grand.ink + grand.holes
-  grand.bags        = buildings.reduce((s, b) => s + (+bags[b.id] || 0), 0)
-  grand.repairTotal = Object.values(repairs).reduce((s, v) => s + (+v || 0), 0)
+  }, { blue: 0, white: 0, grey: 0 })
+  grand.total = grand.blue + grand.white + grand.grey
+  grand.bags  = buildings.reduce((s, b) => s + (+bags[b.id] || 0), 0)
+
+  const grandRejects = SIZES.reduce((a, s) => {
+    const r = rejectGowns[s] || emptyRejectRow()
+    a.ink    += +r.ink    || 0
+    a.holes  += +r.holes  || 0
+    a.repair += +r.repair || 0
+    return a
+  }, { ink: 0, holes: 0, repair: 0 })
+  grandRejects.total   = grandRejects.ink + grandRejects.holes
+  grand.repairTotal    = Object.values(repairs).reduce((s, v) => s + (+v || 0), 0)
+
+  const allocValid = Math.round(Object.values(allocPcts).reduce((s, v) => s + (+v || 0), 0)) === 100
 
   const hasData = grand.total > 0 || grand.bags > 0 || grand.repairTotal > 0
+    || grandRejects.ink > 0 || grandRejects.holes > 0 || grandRejects.repair > 0
 
   // Productivity calcs for live preview
   const sh    = parseFloat(shiftHours) || 0
@@ -649,20 +756,27 @@ export default function StaffNewEntry() {
     mutationFn: async () => {
       if (!clientId) throw new Error('Select a client')
 
+      if (!allocValid && (grandRejects.ink > 0 || grandRejects.holes > 0 || grandRejects.repair > 0)) {
+        throw new Error('Allocation percentages must total 100% before submitting rejects/repairs')
+      }
+
       for (const b of buildings) {
-        const bid = b.id
+        const bid  = b.id
+        const pct  = (allocPcts[bid] || 0) / 100
         const rowData = SIZES.map((size, i) => {
-          const r = (gowns[bid] || {})[size] || emptyGownRow()
+          const r  = (gowns[bid] || {})[size] || emptyGownRow()
+          const rj = rejectGowns[size]        || emptyRejectRow()
           return {
             size_label:  size,
             sort_order:  i,
-            blue_gowns:  +r.blue   || 0,
-            white_gowns: +r.white  || 0,
-            grey_gowns:  +r.grey   || 0,
+            blue_gowns:  +r.blue  || 0,
+            white_gowns: +r.white || 0,
+            grey_gowns:  +r.grey  || 0,
             qty_packed:  (+r.blue || 0) + (+r.white || 0) + (+r.grey || 0),
-            ink_stain:   +r.ink    || 0,
-            large_holes: +r.holes  || 0,
-            to_repair:   +r.repair || 0,
+            // Global reject/repair total × this building's allocation share
+            ink_stain:   Math.round((+rj.ink    || 0) * pct),
+            large_holes: Math.round((+rj.holes  || 0) * pct),
+            to_repair:   Math.round((+rj.repair || 0) * pct),
           }
         }).filter(r => r.qty_packed || r.ink_stain || r.large_holes || r.to_repair)
 
@@ -720,7 +834,8 @@ export default function StaffNewEntry() {
   function startNewDay() {
     setDate(todayStr())
     const blank = emptyState(buildings)
-    setGowns(blank.gowns); setBags(blank.bags); setRepairs(blank.repairs)
+    setGowns(blank.gowns); setBags(blank.bags)
+    setRejectGowns(blank.rejectGowns); setRepairs(blank.repairs)
     setNotes(''); setShiftHrs(''); setStaffN(''); setDone(false); setActiveIdx(0)
   }
 
@@ -747,8 +862,8 @@ export default function StaffNewEntry() {
             {grand.blue  > 0 && <div className="flex justify-between"><span className="text-gray-500 pl-3">— Blue</span><span className="font-semibold text-blue-700">{grand.blue}</span></div>}
             {grand.white > 0 && <div className="flex justify-between"><span className="text-gray-500 pl-3">— White</span><span className="font-semibold text-gray-700">{grand.white}</span></div>}
             {grand.grey  > 0 && <div className="flex justify-between"><span className="text-gray-500 pl-3">— Grey</span><span className="font-semibold text-gray-600">{grand.grey}</span></div>}
-            <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1"><span className="text-gray-500">Rejects</span><span className="font-bold text-red-600">{grand.rejects}</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Repairs</span><span className="font-bold text-amber-600">{grand.repair}</span></div>
+            <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1"><span className="text-gray-500">Rejects (ink + holes)</span><span className="font-bold text-red-600">{grandRejects.total}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Repairs</span><span className="font-bold text-amber-600">{grandRejects.repair}</span></div>
             <div className="flex justify-between"><span className="text-gray-500">Bags</span><span className="font-bold text-purple-700">{grand.bags}</span></div>
           </div>
 
@@ -877,12 +992,21 @@ export default function StaffNewEntry() {
             />
           </div>
 
-          {/* ── BAGS + REPAIRS (both layouts) ── */}
+          {/* ── REJECTS & REPAIRS (global, auto-allocated) ── */}
+          <RejectsRepairsSection
+            rejectGowns={rejectGowns}
+            onReject={setReject}
+            buildings={buildings}
+            allocPcts={allocPcts}
+            onAllocChange={setAllocPct}
+          />
+
+          {/* ── PROCESS (labelling etc.) + BAGS ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Bags per building */}
             <div className="card p-4">
               <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <Package size={16} className="text-purple-600" /> Bags
+                <Package size={16} className="text-purple-600" /> Bags per Building
               </h3>
               <div className="space-y-2">
                 {buildings.map(b => (
@@ -899,9 +1023,9 @@ export default function StaffNewEntry() {
               </div>
             </div>
 
-            {/* Repairs & process */}
+            {/* Process items */}
             <div className="card p-4">
-              <h3 className="font-semibold text-gray-800 mb-3">Process & Repairs</h3>
+              <h3 className="font-semibold text-gray-800 mb-3">Process &amp; Labelling</h3>
               <div className="space-y-2">
                 {REPAIR_FIELDS.map(({ key, label }) => (
                   <div key={key} className="flex items-center gap-3">
