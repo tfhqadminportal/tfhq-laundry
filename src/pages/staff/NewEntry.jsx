@@ -501,7 +501,7 @@ function useClients(userId, isAdmin) {
     queryFn: async () => {
       const q = supabase
         .from('laundry_clients')
-        .select('id, name, staff_count, target_gowns_per_hour, laundry_buildings(id, name, active, sort_order, bag_color)')
+        .select('id, name, staff_count, target_gowns_per_hour, laundry_buildings(id, name, active, sort_order, bag_color, reject_pct)')
         .eq('active', true).order('name')
       if (!isAdmin) {
         const { data: acc } = await supabase.from('laundry_staff_access').select('client_id').eq('staff_id', userId)
@@ -603,12 +603,18 @@ export default function StaffNewEntry() {
       buildings.forEach(b => { if (next[b.id] === undefined) next[b.id] = '' })
       return next
     })
-    // Load saved allocation % for this client, or default to equal split
-    const saved = lsLoad(allocKey(clientId))
-    if (saved && Object.keys(saved).length === buildings.length) {
-      setAllocPcts(saved)
+    // Load allocation % — priority: DB reject_pct → localStorage → equal split
+    const dbTotal = buildings.reduce((s, b) => s + (parseFloat(b.reject_pct) || 0), 0)
+    if (dbTotal > 0) {
+      // Always use admin-configured reject percentages from the database
+      setAllocPcts(Object.fromEntries(buildings.map(b => [b.id, parseFloat(b.reject_pct) || 0])))
     } else {
-      setAllocPcts(defaultAlloc(buildings))
+      const saved = lsLoad(allocKey(clientId))
+      if (saved && Object.keys(saved).length === buildings.length) {
+        setAllocPcts(saved)
+      } else {
+        setAllocPcts(defaultAlloc(buildings))
+      }
     }
   }, [clientId, buildings.map(b => b.id).join()])
 
