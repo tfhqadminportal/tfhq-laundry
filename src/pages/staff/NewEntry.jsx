@@ -61,8 +61,9 @@ function N({ value, onChange, accent, small }) {
       placeholder="—"
       value={value}
       onChange={e => onChange(e.target.value)}
-      className={`${small ? 'h-8' : 'h-10'} w-full rounded-lg border text-center text-sm font-semibold
+      className={`${small ? 'h-9' : 'h-11'} w-full rounded-lg border text-center font-semibold
         focus:outline-none focus:ring-1 transition-colors ${colours[accent || 'plain']}`}
+      style={{ fontSize: 16 }}
     />
   )
 }
@@ -123,75 +124,123 @@ function BuildingCard({ building, gowns, bags, onGown, onBag }) {
   const total = totals.blue + totals.white + totals.grey
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {/* Building header + bags */}
-      <div className="flex items-center justify-between bg-navy-700 text-white px-4 py-2.5 rounded-xl">
-        <div>
-          <p className="font-bold">{building.name}</p>
+      <div className="flex items-center justify-between bg-navy-700 text-white px-4 py-3 rounded-xl">
+        <div className="min-w-0 flex-1 pr-3">
+          <p className="font-bold text-base">{building.name}</p>
           {total > 0 && (
-            <p className="text-xs text-navy-300">
-              {total.toLocaleString()} gowns · {totals.ink + totals.holes} rejects · {totals.repair} repairs
+            <p className="text-xs text-navy-300 mt-0.5">
+              {total.toLocaleString()} packed · {totals.ink + totals.holes} rejects · {totals.repair} repairs
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Package size={14} className="text-navy-300" />
-          <span className="text-xs text-navy-300 whitespace-nowrap">
+        <div className="flex-shrink-0 text-right">
+          <p className="text-xs text-navy-300 mb-1 flex items-center justify-end gap-1">
+            <Package size={12} />
             {building.bag_color ? `${building.bag_color} bags` : 'Bags'}
-          </span>
+          </p>
           <input
             type="number" min="0" inputMode="numeric" placeholder="0"
             value={bags}
             onChange={e => onBag(e.target.value)}
-            className="w-16 h-8 rounded-lg bg-navy-600 border border-navy-500 text-white text-center text-sm font-bold focus:outline-none focus:ring-1 focus:ring-gold-400"
+            className="w-16 h-10 rounded-lg bg-navy-600 border border-navy-500 text-white text-center font-bold focus:outline-none focus:ring-1 focus:ring-gold-400"
           />
         </div>
       </div>
 
-      {/* Column labels — 8 cols: Size | Blue | White | Grey | Ink | Holes | Repair */}
-      <div className="grid grid-cols-8 gap-0.5 px-1">
-        <div className="col-span-1 text-xs font-bold text-center text-gray-400 uppercase">Size</div>
-        <div className="text-xs font-bold text-center text-blue-600">Blue</div>
-        <div className="text-xs font-bold text-center text-gray-500">Wht</div>
-        <div className="text-xs font-bold text-center text-gray-600">Gry</div>
-        <div className="text-xs font-bold text-center text-red-500">Ink</div>
-        <div className="text-xs font-bold text-center text-orange-500">Hole</div>
-        <div className="text-xs font-bold text-center text-amber-500">Rep</div>
-        <div className="text-xs font-bold text-center text-navy-500">Tot</div>
-      </div>
-
-      {/* Size rows */}
+      {/* Size rows — two input rows per size: Packed | Issues */}
       {SIZES.map((size, si) => {
         const r = gowns[size] || emptyGownRow()
-        const rowTot = (+r.blue || 0) + (+r.white || 0) + (+r.grey || 0)
+        const rowTotal = (+r.blue || 0) + (+r.white || 0) + (+r.grey || 0)
         return (
-          <div key={size} className={`grid grid-cols-8 gap-0.5 items-center px-1 ${si % 2 === 0 ? '' : 'bg-gray-50 rounded-lg py-0.5'}`}>
-            <div className="col-span-1 flex items-center justify-center">
-              <span className="w-9 h-9 bg-navy-100 text-navy-700 rounded-lg font-bold text-xs flex items-center justify-center">{size}</span>
+          <div key={size} className={`rounded-xl overflow-hidden border ${si % 2 === 0 ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
+            {/* Size label bar */}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-navy-50 border-b border-navy-100">
+              <span className="font-bold text-navy-700 text-sm tracking-wide">{size}</span>
+              {rowTotal > 0 && (
+                <span className="text-xs font-semibold text-navy-600 bg-navy-100 px-2 py-0.5 rounded-full">
+                  {rowTotal} packed
+                </span>
+              )}
             </div>
-            <N value={r.blue}   onChange={v => onGown(size, 'blue',   v)} accent="blue"   small />
-            <N value={r.white}  onChange={v => onGown(size, 'white',  v)} accent="white"  small />
-            <N value={r.grey}   onChange={v => onGown(size, 'grey',   v)} accent="grey"   small />
-            <N value={r.ink}    onChange={v => onGown(size, 'ink',    v)} accent="ink"    small />
-            <N value={r.holes}  onChange={v => onGown(size, 'holes',  v)} accent="holes"  small />
-            <N value={r.repair} onChange={v => onGown(size, 'repair', v)} accent="repair" small />
-            <div className="h-8 flex items-center justify-center text-xs font-bold text-navy-700">
-              {rowTot || <span className="text-gray-200">—</span>}
+
+            <div className="px-3 pt-2 pb-3 space-y-2">
+              {/* Packed gowns */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Packed Gowns</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-blue-600 mb-1 text-center">Blue</label>
+                    <N value={r.blue}  onChange={v => onGown(size, 'blue',  v)} accent="blue" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1 text-center">White</label>
+                    <N value={r.white} onChange={v => onGown(size, 'white', v)} accent="white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1 text-center">Grey</label>
+                    <N value={r.grey}  onChange={v => onGown(size, 'grey',  v)} accent="grey" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Issues */}
+              <div>
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Issues</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-red-500 mb-1 text-center">Ink Stain</label>
+                    <N value={r.ink}    onChange={v => onGown(size, 'ink',    v)} accent="ink" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-orange-500 mb-1 text-center">Holes</label>
+                    <N value={r.holes}  onChange={v => onGown(size, 'holes',  v)} accent="holes" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-amber-500 mb-1 text-center">Repair</label>
+                    <N value={r.repair} onChange={v => onGown(size, 'repair', v)} accent="repair" />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )
       })}
 
-      {/* Building totals row */}
-      <div className="grid grid-cols-8 gap-0.5 px-1 bg-navy-50 rounded-xl py-2 border border-navy-100">
-        <div className="col-span-1 text-xs font-bold text-navy-700 text-center flex items-center justify-center">Tot</div>
-        <div className="text-xs font-bold text-blue-700 text-center">{totals.blue || '—'}</div>
-        <div className="text-xs font-bold text-gray-700 text-center">{totals.white || '—'}</div>
-        <div className="text-xs font-bold text-gray-600 text-center">{totals.grey || '—'}</div>
-        <div className="text-xs font-bold text-red-600 text-center">{totals.ink || '—'}</div>
-        <div className="text-xs font-bold text-orange-600 text-center">{totals.holes || '—'}</div>
-        <div className="text-xs font-bold text-amber-600 text-center">{totals.repair || '—'}</div>
-        <div className="text-xs font-bold text-navy-700 text-center">{total || '—'}</div>
+      {/* Building totals summary */}
+      <div className="bg-navy-50 rounded-xl p-4 border border-navy-100">
+        <p className="text-xs font-bold text-navy-600 uppercase tracking-wider mb-3">Building Totals</p>
+        <div className="grid grid-cols-3 gap-y-3 gap-x-2 text-center text-xs mb-3">
+          <div>
+            <p className="font-bold text-blue-700 text-lg leading-none">{totals.blue || '—'}</p>
+            <p className="text-gray-400 mt-0.5">Blue</p>
+          </div>
+          <div>
+            <p className="font-bold text-gray-700 text-lg leading-none">{totals.white || '—'}</p>
+            <p className="text-gray-400 mt-0.5">White</p>
+          </div>
+          <div>
+            <p className="font-bold text-gray-600 text-lg leading-none">{totals.grey || '—'}</p>
+            <p className="text-gray-400 mt-0.5">Grey</p>
+          </div>
+          <div>
+            <p className="font-bold text-red-600 text-lg leading-none">{totals.ink || '—'}</p>
+            <p className="text-gray-400 mt-0.5">Ink Stain</p>
+          </div>
+          <div>
+            <p className="font-bold text-orange-600 text-lg leading-none">{totals.holes || '—'}</p>
+            <p className="text-gray-400 mt-0.5">Holes</p>
+          </div>
+          <div>
+            <p className="font-bold text-amber-600 text-lg leading-none">{totals.repair || '—'}</p>
+            <p className="text-gray-400 mt-0.5">Repair</p>
+          </div>
+        </div>
+        <div className="border-t border-navy-200 pt-3 flex items-center justify-between">
+          <span className="text-sm font-semibold text-navy-600">Total Packed</span>
+          <span className="text-xl font-bold text-navy-700">{total.toLocaleString()}</span>
+        </div>
       </div>
     </div>
   )
@@ -783,8 +832,8 @@ export default function StaffNewEntry() {
                 }, 0) : 0)
                 return (
                   <button key={b.id} onClick={() => setActiveIdx(i)}
-                    className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-semibold transition-colors
-                      ${activeIdx === i ? 'bg-navy-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                    className={`flex-shrink-0 px-5 py-2.5 rounded-full text-sm font-semibold transition-colors
+                      ${activeIdx === i ? 'bg-navy-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 active:bg-gray-200'}`}>
                     {b.name}{t > 0 ? ` (${t})` : ''}
                   </button>
                 )
@@ -806,12 +855,12 @@ export default function StaffNewEntry() {
             {buildings.length > 1 && (
               <div className="flex gap-2">
                 <button onClick={() => setActiveIdx(i => Math.max(0, i - 1))} disabled={activeIdx === 0}
-                  className="btn-secondary flex-1 disabled:opacity-40">
-                  <ChevronLeft size={16} /> {buildings[activeIdx - 1]?.name || 'Prev'}
+                  className="btn-secondary flex-1 py-3 text-sm disabled:opacity-40">
+                  <ChevronLeft size={18} /> {buildings[activeIdx - 1]?.name || 'Previous'}
                 </button>
                 <button onClick={() => setActiveIdx(i => Math.min(buildings.length - 1, i + 1))} disabled={activeIdx === buildings.length - 1}
-                  className="btn-secondary flex-1 disabled:opacity-40">
-                  {buildings[activeIdx + 1]?.name || 'Next'} <ChevronRight size={16} />
+                  className="btn-secondary flex-1 py-3 text-sm disabled:opacity-40">
+                  {buildings[activeIdx + 1]?.name || 'Next'} <ChevronRight size={18} />
                 </button>
               </div>
             )}

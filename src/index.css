@@ -6,12 +6,18 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Prevent text size inflation on orientation change */
+    -webkit-text-size-adjust: 100%;
   }
   body {
     @apply bg-gray-50 text-gray-900;
   }
   * {
     @apply border-gray-200;
+  }
+  /* Prevent double-tap zoom on mobile inputs/buttons */
+  input, button, select, textarea {
+    touch-action: manipulation;
   }
 }
 
@@ -56,9 +62,17 @@
 
   /* Form */
   .input {
-    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900
+    @apply w-full rounded-lg border border-gray-300 px-3 py-2.5 text-base text-gray-900
            placeholder-gray-400 focus:border-navy-500 focus:outline-none focus:ring-1
            focus:ring-navy-500 disabled:bg-gray-50 disabled:cursor-not-allowed;
+    /* Prevent iOS from zooming on focus (requires font-size ≥ 16px) */
+    font-size: 16px;
+  }
+  @media (min-width: 1024px) {
+    .input {
+      @apply text-sm py-2;
+      font-size: 0.875rem;
+    }
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;
