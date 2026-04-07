@@ -211,8 +211,9 @@ function RoleEditor({ staff, onClose }) {
       <p className="text-sm text-gray-600">Change role for <strong>{staff.full_name || staff.email}</strong>:</p>
       <div className="space-y-2">
         {[
-          { value: 'staff', label: 'Staff', desc: 'Can submit daily log entries for assigned clients only.' },
-          { value: 'admin', label: 'Admin', desc: 'Full access — dashboard, all logs, clients, reports, and staff management.' },
+          { value: 'staff',    label: 'Staff',    desc: 'Can submit daily log entries for assigned clients only.' },
+          { value: 'admin',    label: 'Admin',    desc: 'Full access — dashboard, all logs, clients, reports, staff and accounts.' },
+          { value: 'accounts', label: 'Accounts', desc: 'Accounts team access — processing log, pricing catalog and Xero quote builder.' },
         ].map(opt => (
           <label
             key={opt.value}
@@ -335,7 +336,9 @@ export default function AdminStaff() {
                     <div className="w-8 h-8 rounded-full bg-navy-100 flex items-center justify-center flex-shrink-0">
                       {s.role === 'admin'
                         ? <Shield size={14} className="text-gold-500" />
-                        : <User size={14} className="text-navy-600" />
+                        : s.role === 'accounts'
+                          ? <Shield size={14} className="text-green-500" />
+                          : <User size={14} className="text-navy-600" />
                       }
                     </div>
                     <span className="font-medium text-sm">{s.full_name || '—'}</span>
@@ -343,9 +346,10 @@ export default function AdminStaff() {
                 </td>
                 <td className="table-cell text-gray-500 text-sm">{s.email}</td>
                 <td className="table-cell">
-                  <span className={s.role === 'admin'
-                    ? 'badge bg-gold-100 text-gold-700'
-                    : 'badge-blue'
+                  <span className={
+                    s.role === 'admin'    ? 'badge bg-gold-100 text-gold-700' :
+                    s.role === 'accounts' ? 'badge bg-green-100 text-green-700' :
+                    'badge-blue'
                   }>
                     {s.role || 'staff'}
                   </span>
@@ -367,7 +371,7 @@ export default function AdminStaff() {
                     >
                       <Shield size={13} /> Role
                     </button>
-                    {(s.role !== 'admin') && (
+                    {(s.role === 'staff') && (
                       <button
                         onClick={() => setAccessStaff(s)}
                         className="btn-secondary btn-sm"

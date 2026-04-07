@@ -47,11 +47,13 @@ export function AuthProvider({ children }) {
     if (error) throw error
   }
 
-  const role = profile?.role ?? null
-  const isAdmin = role === 'admin'
+  const role       = profile?.role ?? null
+  const isAdmin    = role === 'admin'
+  const isAccounts = role === 'accounts'
+  const isAccountsOrAdmin = role === 'admin' || role === 'accounts'
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, isAdmin, loading, signIn, signOut, refetchProfile: () => user && fetchProfile(user.id) }}>
+    <AuthContext.Provider value={{ user, profile, role, isAdmin, isAccounts, isAccountsOrAdmin, loading, signIn, signOut, refetchProfile: () => user && fetchProfile(user.id) }}>
       {children}
     </AuthContext.Provider>
   )

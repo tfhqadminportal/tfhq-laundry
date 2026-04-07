@@ -11,6 +11,7 @@ import AdminLogDetail from '@/pages/admin/LogDetail'
 import AdminReports from '@/pages/admin/Reports'
 import StaffNewEntry from '@/pages/staff/NewEntry'
 import StaffHistory from '@/pages/staff/History'
+import Accounts from '@/pages/accounts/Accounts'
 
 // ─── Spinner ──────────────────────────────────────────────────
 function Spinner() {
@@ -25,19 +26,50 @@ function Spinner() {
 }
 
 // ─── Guards ────────────────────────────────────────────────────
-function RequireAuth({ children, adminOnly = false }) {
+
+/** Any authenticated user */
+function RequireAuth({ children }) {
+  const { user, loading } = useAuth()
+  if (loading) return <Spinner />
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
+
+/** Admin role only */
+function RequireAdmin({ children }) {
   const { user, loading, isAdmin } = useAuth()
   if (loading) return <Spinner />
   if (!user) return <Navigate to="/login" replace />
-  if (adminOnly && !isAdmin) return <Navigate to="/log/new" replace />
+  if (!isAdmin) return <Navigate to="/log/new" replace />
+  return children
+}
+
+/** Admin OR accounts role */
+function RequireAccounts({ children }) {
+  const { user, loading, isAdmin, isAccounts } = useAuth()
+  if (loading) return <Spinner />
+  if (!user) return <Navigate to="/login" replace />
+  if (!isAdmin && !isAccounts) return <Navigate to="/log/new" replace />
   return children
 }
 
 function PublicOnly({ children }) {
-  const { user, loading, isAdmin } = useAuth()
+  const { user, loading, isAdmin, isAccounts } = useAuth()
   if (loading) return <Spinner />
-  if (user) return <Navigate to={isAdmin ? '/admin/dashboard' : '/log/new'} replace />
+  if (user) {
+    if (isAdmin)    return <Navigate to="/admin/dashboard" replace />
+    if (isAccounts) return <Navigate to="/accounts"        replace />
+    return <Navigate to="/log/new" replace />
+  }
   return children
+}
+
+/** Redirects "/" to the right home page based on role */
+function DefaultRedirect() {
+  const { isAdmin, isAccounts } = useAuth()
+  if (isAdmin)    return <Navigate to="/admin/dashboard" replace />
+  if (isAccounts) return <Navigate to="/accounts"        replace />
+  return <Navigate to="/log/new" replace />
 }
 
 // ─── App ───────────────────────────────────────────────────────
@@ -49,20 +81,23 @@ export default function App() {
 
       {/* App Shell */}
       <Route path="/" element={<RequireAuth><AppLayout /></RequireAuth>}>
-        <Route index element={<Navigate to="/log/new" replace />} />
+        <Route index element={<DefaultRedirect />} />
 
         {/* Staff Routes */}
         <Route path="log/new"     element={<StaffNewEntry />} />
         <Route path="log/history" element={<StaffHistory />} />
 
         {/* Admin Routes */}
-        <Route path="admin/dashboard"       element={<RequireAuth adminOnly><AdminDashboard /></RequireAuth>} />
-        <Route path="admin/clients"         element={<RequireAuth adminOnly><AdminClients /></RequireAuth>} />
-        <Route path="admin/clients/:id"     element={<RequireAuth adminOnly><AdminClientDetail /></RequireAuth>} />
-        <Route path="admin/staff"           element={<RequireAuth adminOnly><AdminStaff /></RequireAuth>} />
-        <Route path="admin/logs"            element={<RequireAuth adminOnly><AdminLogs /></RequireAuth>} />
-        <Route path="admin/logs/:id"        element={<RequireAuth adminOnly><AdminLogDetail /></RequireAuth>} />
-        <Route path="admin/reports"         element={<RequireAuth adminOnly><AdminReports /></RequireAuth>} />
+        <Route path="admin/dashboard"   element={<RequireAdmin><AdminDashboard /></RequireAdmin>} />
+        <Route path="admin/clients"     element={<RequireAdmin><AdminClients /></RequireAdmin>} />
+        <Route path="admin/clients/:id" element={<RequireAdmin><AdminClientDetail /></RequireAdmin>} />
+        <Route path="admin/staff"       element={<RequireAdmin><AdminStaff /></RequireAdmin>} />
+        <Route path="admin/logs"        element={<RequireAdmin><AdminLogs /></RequireAdmin>} />
+        <Route path="admin/logs/:id"    element={<RequireAdmin><AdminLogDetail /></RequireAdmin>} />
+        <Route path="admin/reports"     element={<RequireAdmin><AdminReports /></RequireAdmin>} />
+
+        {/* Accounts Routes — admin AND accounts role */}
+        <Route path="accounts" element={<RequireAccounts><Accounts /></RequireAccounts>} />
       </Route>
 
       <Route path="*" element={<Navigate to="/login" replace />} />
