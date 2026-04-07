@@ -607,6 +607,20 @@ export default function StaffNewEntry() {
   // Clear roster-filled flag when date changes so it can re-trigger
   useEffect(() => { setRosterFilled(false) }, [date])
 
+  // ── Auto-fill general_repair = To Repair total; fp_inject = Ink + Holes total ──
+  useEffect(() => {
+    const repairTotal   = SIZES.reduce((a, s) => a + (+(rejectGowns[s] || {}).repair || 0), 0)
+    const inkHolesTotal = SIZES.reduce((a, s) => {
+      const r = rejectGowns[s] || {}
+      return a + (+r.ink || 0) + (+r.holes || 0)
+    }, 0)
+    setRepairs(p => ({
+      ...p,
+      general_repair: repairTotal   > 0 ? repairTotal   : p.general_repair,
+      fp_inject:      inkHolesTotal > 0 ? inkHolesTotal : p.fp_inject,
+    }))
+  }, [JSON.stringify(rejectGowns)])
+
   // ── Persist draft to localStorage ──
   useEffect(() => {
     if (!clientId) return

@@ -6,8 +6,9 @@ import {
 } from 'date-fns'
 import {
   Calculator, ClipboardList, DollarSign, Plus, Pencil, Trash2,
-  FileDown, Building2, AlertCircle, Package,
+  FileDown, Building2, AlertCircle, Package, TableProperties,
 } from 'lucide-react'
+import WeeklyReport from '@/components/ui/WeeklyReport'
 import Modal from '@/components/ui/Modal'
 import toast from 'react-hot-toast'
 
@@ -1086,9 +1087,10 @@ function QuoteBuilder() {
 // ─── MAIN ACCOUNTS PAGE ────────────────────────────────────────
 
 const TABS = [
-  { id: 'log',     label: 'Processing Log',  icon: ClipboardList },
-  { id: 'pricing', label: 'Pricing Catalog', icon: DollarSign    },
-  { id: 'quote',   label: 'Quote Builder',   icon: Calculator    },
+  { id: 'log',     label: 'Processing Log',  icon: ClipboardList    },
+  { id: 'weekly',  label: 'Weekly Report',   icon: TableProperties  },
+  { id: 'pricing', label: 'Pricing Catalog', icon: DollarSign       },
+  { id: 'quote',   label: 'Quote Builder',   icon: Calculator       },
 ]
 
 export default function Accounts() {
@@ -1124,6 +1126,7 @@ export default function Accounts() {
 
       {/* Tab panels */}
       {tab === 'log'     && <ProcessingLog />}
+      {tab === 'weekly'  && <WeeklyReport />}
       {tab === 'pricing' && <PricingCatalog />}
       {tab === 'quote'   && <QuoteBuilder />}
     </div>

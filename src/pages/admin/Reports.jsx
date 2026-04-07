@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { format, subDays, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from 'date-fns'
-import { FileDown, BarChart2, Calendar, Building2 } from 'lucide-react'
+import { FileDown, BarChart2, Calendar, Building2, TableProperties } from 'lucide-react'
+import WeeklyReport from '@/components/ui/WeeklyReport'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend, LineChart, Line
@@ -171,10 +172,22 @@ export default function AdminReports() {
 
   return (
     <div className="p-6 space-y-6">
+
+      {/* ── Weekly Report section ── */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <TableProperties size={18} className="text-navy-600" />
+          <h2 className="text-lg font-bold text-gray-900">Weekly Report &amp; Excel Export</h2>
+        </div>
+        <WeeklyReport />
+      </div>
+
+      <div className="border-t border-gray-200 pt-6">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Reports & Export</h1>
+          <h1 className="text-xl font-bold text-gray-900">Charts &amp; CSV Export</h1>
           <p className="text-sm text-gray-500 mt-0.5">Analyse and export laundry data</p>
         </div>
         <button
@@ -316,6 +329,7 @@ export default function AdminReports() {
           </div>
         </>
       )}
+      </div>{/* end charts section */}
     </div>
   )
 }
