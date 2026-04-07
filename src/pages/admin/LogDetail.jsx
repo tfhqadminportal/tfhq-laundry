@@ -23,7 +23,6 @@ function useLog(id) {
           *,
           laundry_clients(id, name, staff_count, target_gowns_per_hour),
           laundry_buildings(id, name, bag_color),
-          laundry_profiles(full_name, email),
           laundry_log_rows(*)
         `)
         .eq('id', id)
@@ -32,6 +31,22 @@ function useLog(id) {
       return data
     },
     enabled: !!id,
+  })
+}
+
+function useSubmitterProfile(userId) {
+  return useQuery({
+    queryKey: ['submitter-profile', userId],
+    queryFn: async () => {
+      if (!userId) return null
+      const { data } = await supabase
+        .from('laundry_profiles')
+        .select('full_name, email')
+        .eq('id', userId)
+        .maybeSingle()
+      return data
+    },
+    enabled: !!userId,
   })
 }
 
@@ -292,6 +307,7 @@ export default function AdminLogDetail() {
   const { data: extras }        = useDailyExtras(clientId, logDate)
   const { data: buildings = [] } = useClientBuildings(clientId)
   const { data: dayLogs = [] }   = useDayLogs(clientId, logDate)
+  const { data: submitter }      = useSubmitterProfile(log?.submitted_by)
 
   function startEdit() {
     setRows(
@@ -419,7 +435,7 @@ export default function AdminLogDetail() {
           </h1>
           <p className="text-gray-500 mt-0.5">
             {format(new Date(log.log_date), 'EEEE, d MMMM yyyy')}
-            &nbsp;·&nbsp;Submitted by {log.laundry_profiles?.full_name || log.laundry_profiles?.email || 'Unknown'}
+            &nbsp;·&nbsp;Submitted by {submitter?.full_name || submitter?.email || 'Unknown'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">

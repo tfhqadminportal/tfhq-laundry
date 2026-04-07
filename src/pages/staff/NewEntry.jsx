@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { format } from 'date-fns'
 import {
   Save, Trash2, CheckCircle, ChevronLeft, ChevronRight,
-  Package, Clock, TrendingUp, Users, CalendarClock, Settings,
+  Package, Clock, TrendingUp, Users, CalendarClock,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useRosterForDate } from '@/hooks/useRosterHours'
@@ -354,11 +354,9 @@ function DesktopTable({ buildings, gowns, bags, onGown, onBag }) {
 }
 
 // ─── Rejects & Repairs section ─────────────────────────────────
-// Ink stain / holes / repair are entered as site-wide totals (per size),
-// then automatically allocated across buildings by configurable percentages.
-function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, onAllocChange }) {
-  const [showEdit, setShowEdit] = useState(false)
-
+// Staff enters site-wide totals per size. Allocation across buildings
+// is handled automatically on save — not shown here.
+function RejectsRepairsSection({ rejectGowns, onReject }) {
   const grandTotals = SIZES.reduce((a, s) => {
     const r = rejectGowns[s] || emptyRejectRow()
     a.ink    += +r.ink    || 0
@@ -368,75 +366,17 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
   }, { ink: 0, holes: 0, repair: 0 })
   const hasAny = grandTotals.ink + grandTotals.holes + grandTotals.repair > 0
 
-  const totalAllocPct = Object.values(allocPcts).reduce((s, v) => s + (+v || 0), 0)
-  const allocValid    = Math.round(totalAllocPct) === 100
-
   return (
     <div className="card p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold text-gray-800">Rejects &amp; Repairs</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Ink &amp; Holes = site-wide totals · Repairs split by building %
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowEdit(e => !e)}
-          className="btn-secondary btn-sm flex items-center gap-1.5"
-        >
-          <Settings size={13} />
-          {showEdit ? 'Done' : 'Repair Alloc %'}
-        </button>
-      </div>
+      <h3 className="font-semibold text-gray-800">Rejects &amp; Repairs</h3>
 
-      {/* Allocation editor */}
-      {showEdit && (
-        <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
-          <p className="text-xs font-semibold text-gray-600 mb-1">
-            Repair distribution across buildings — must total 100%
-          </p>
-          <p className="text-xs text-gray-400 mb-2">
-            Ink Stain &amp; Large Holes are not split — they are recorded as site-wide totals.
-          </p>
-          {buildings.map(b => (
-            <div key={b.id} className="flex items-center gap-3">
-              <span className="flex-1 text-sm font-medium text-gray-700">{b.name}</span>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number" min="0" max="100" inputMode="numeric"
-                  value={allocPcts[b.id] ?? ''}
-                  onChange={e => onAllocChange(b.id, e.target.value)}
-                  className="w-16 h-10 rounded-lg border text-center text-sm font-bold focus:outline-none focus:ring-1 focus:ring-navy-500
-                    border-gray-300 bg-white text-gray-900"
-                  style={{ fontSize: 16 }}
-                />
-                <span className="text-sm font-semibold text-gray-500">%</span>
-              </div>
-            </div>
-          ))}
-          <div className={`flex items-center justify-between pt-2 border-t border-gray-200 text-sm font-semibold ${allocValid ? 'text-green-600' : 'text-red-500'}`}>
-            <span>Total</span>
-            <span>{totalAllocPct}% {allocValid ? '✓' : '— must equal 100%'}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Per-size reject/repair inputs */}
       <div className="space-y-2">
         {/* Column headers */}
         <div className="grid grid-cols-4 gap-2 px-1">
           <div className="text-xs font-bold text-gray-400 uppercase text-center">Size</div>
-          <div className="text-xs font-bold text-red-500    text-center leading-tight">
-            Ink Stain<br/><span className="text-[10px] font-normal text-gray-400">site total</span>
-          </div>
-          <div className="text-xs font-bold text-orange-500 text-center leading-tight">
-            Holes<br/><span className="text-[10px] font-normal text-gray-400">site total</span>
-          </div>
-          <div className="text-xs font-bold text-amber-500  text-center leading-tight">
-            Repair<br/><span className="text-[10px] font-normal text-gray-400">split by %</span>
-          </div>
+          <div className="text-xs font-bold text-red-500    text-center">Ink Stain</div>
+          <div className="text-xs font-bold text-orange-500 text-center">Holes</div>
+          <div className="text-xs font-bold text-amber-500  text-center">To Repair</div>
         </div>
 
         {SIZES.map((size, si) => {
@@ -465,36 +405,6 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
           </div>
         )}
       </div>
-
-      {/* Repair allocation preview — only repairs are split across buildings */}
-      {grandTotals.repair > 0 && buildings.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Repair allocation to buildings
-          </p>
-          {buildings.map(b => {
-            const pct = (allocPcts[b.id] || 0) / 100
-            const rep = Math.round(grandTotals.repair * pct)
-            if (!rep) return null
-            return (
-              <div key={b.id} className="flex items-center gap-3 bg-amber-50 rounded-xl px-3 py-2.5 border border-amber-100">
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-gray-800">{b.name}</p>
-                  <p className="text-xs text-gray-400">{allocPcts[b.id] || 0}% allocation</p>
-                </div>
-                <div className="flex gap-3 text-xs font-semibold">
-                  <span className="text-amber-700">{rep} repairs</span>
-                </div>
-              </div>
-            )
-          })}
-          {!allocValid && (
-            <p className="text-xs text-red-500 text-center">
-              ⚠ Repair allocation % must total 100% before submitting
-            </p>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -1010,9 +920,6 @@ export default function StaffNewEntry() {
           <RejectsRepairsSection
             rejectGowns={rejectGowns}
             onReject={setReject}
-            buildings={buildings}
-            allocPcts={allocPcts}
-            onAllocChange={setAllocPct}
           />
 
           {/* ── PROCESS (labelling etc.) + BAGS ── */}
