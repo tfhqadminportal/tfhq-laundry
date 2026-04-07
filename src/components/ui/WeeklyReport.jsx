@@ -159,17 +159,18 @@ function exportExcel(dates, dayDataMap, buildings, extras, clientName) {
   rows.push([])
 
   // Bags + extras section
+  // general = weekly To Repair total; fp = weekly Ink + Holes total
   const totalExtras = extras.reduce((acc, e) => {
-    acc.labelling += e.labelling      || 0
-    acc.sleeve    += e.sleeve_repair  || 0
-    acc.general   += e.general_repair || 0
-    acc.fp        += e.fp_inject      || 0
+    acc.labelling += e.labelling     || 0
+    acc.sleeve    += e.sleeve_repair || 0
     buildings.forEach(b => {
       const bc = e.bag_counts || {}
       acc.bags[b.id] = (acc.bags[b.id] || 0) + (bc[b.id] || 0)
     })
     return acc
-  }, { labelling: 0, sleeve: 0, general: 0, fp: 0, bags: {} })
+  }, { labelling: 0, sleeve: 0, bags: {} })
+  totalExtras.general = weeklyTot.repair
+  totalExtras.fp      = weeklyTot.ink + weeklyTot.holes
 
   rows.push(['Bags', 'Quantities', ...bNames, 'Total'])
   buildings.forEach(b => {
@@ -293,25 +294,28 @@ export default function WeeklyReport() {
   }, [dates, dayDataMap, buildings])
 
   // Extras totals for the period
+  // general = sum of To Repair from log_rows (not daily_extras)
+  // fp      = sum of Ink Stain + Large Holes from log_rows (not daily_extras)
   const extTot = useMemo(() => {
-    const acc = { labelling: 0, sleeve: 0, general: 0, fp: 0, bags: {} }
+    const acc = { labelling: 0, sleeve: 0, bags: {} }
     buildings.forEach(b => { acc.bags[b.id] = 0 })
     extras.forEach(e => {
-      acc.labelling += e.labelling      || 0
-      acc.sleeve    += e.sleeve_repair  || 0
-      acc.general   += e.general_repair || 0
-      acc.fp        += e.fp_inject      || 0
+      acc.labelling += e.labelling     || 0
+      acc.sleeve    += e.sleeve_repair || 0
       const bc = e.bag_counts || {}
       buildings.forEach(b => { acc.bags[b.id] += bc[b.id] || 0 })
     })
+    // Derive general repair and F&P directly from the log_rows weekly totals
+    acc.general = weeklyTot.repair
+    acc.fp      = weeklyTot.ink + weeklyTot.holes
     return acc
-  }, [extras, buildings])
+  }, [extras, buildings, weeklyTot.repair, weeklyTot.ink, weeklyTot.holes])
 
   const clientName = clients.find(c => c.id === clientId)?.name || ''
 
   const handleExport = () => {
     if (!clientId || !dates.length) return
-    exportExcel(dates, dayDataMap, buildings, extras, clientName)
+    exportExcel(dates, dayDataMap, buildings, extras, clientName, weeklyTot)
   }
 
   return (
@@ -406,7 +410,7 @@ export default function WeeklyReport() {
                       <th key={b.id} className="px-3 py-2 text-right border border-navy-700">{b.name}</th>
                     ))}
                     <th className="px-3 py-2 text-right border border-navy-700 text-red-300">Ink Stain</th>
-                    <th className="px-3 py-2 text-right border border-navy-700 text-orange-300">Lg / Holes</th>
+                    <th className="px-3 py-2 text-right border border-navy-700 text-orange-300">Large/Burnt Holes</th>
                     <th className="px-3 py-2 text-right border border-navy-700 text-amber-300">To Repair</th>
                   </tr>
                 </thead>
