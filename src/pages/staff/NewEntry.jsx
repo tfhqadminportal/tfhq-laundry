@@ -378,7 +378,7 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
         <div>
           <h3 className="font-semibold text-gray-800">Rejects &amp; Repairs</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            Enter totals by size — auto-allocated across buildings
+            Ink &amp; Holes = site-wide totals · Repairs split by building %
           </p>
         </div>
         <button
@@ -387,7 +387,7 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
           className="btn-secondary btn-sm flex items-center gap-1.5"
         >
           <Settings size={13} />
-          {showEdit ? 'Done' : 'Allocation %'}
+          {showEdit ? 'Done' : 'Repair Alloc %'}
         </button>
       </div>
 
@@ -395,7 +395,10 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
       {showEdit && (
         <div className="bg-gray-50 rounded-xl p-3 space-y-2 border border-gray-200">
           <p className="text-xs font-semibold text-gray-600 mb-1">
-            Distribution across buildings — must total 100%
+            Repair distribution across buildings — must total 100%
+          </p>
+          <p className="text-xs text-gray-400 mb-2">
+            Ink Stain &amp; Large Holes are not split — they are recorded as site-wide totals.
           </p>
           {buildings.map(b => (
             <div key={b.id} className="flex items-center gap-3">
@@ -425,9 +428,15 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
         {/* Column headers */}
         <div className="grid grid-cols-4 gap-2 px-1">
           <div className="text-xs font-bold text-gray-400 uppercase text-center">Size</div>
-          <div className="text-xs font-bold text-red-500    text-center">Ink Stain</div>
-          <div className="text-xs font-bold text-orange-500 text-center">Holes</div>
-          <div className="text-xs font-bold text-amber-500  text-center">Repair</div>
+          <div className="text-xs font-bold text-red-500    text-center leading-tight">
+            Ink Stain<br/><span className="text-[10px] font-normal text-gray-400">site total</span>
+          </div>
+          <div className="text-xs font-bold text-orange-500 text-center leading-tight">
+            Holes<br/><span className="text-[10px] font-normal text-gray-400">site total</span>
+          </div>
+          <div className="text-xs font-bold text-amber-500  text-center leading-tight">
+            Repair<br/><span className="text-[10px] font-normal text-gray-400">split by %</span>
+          </div>
         </div>
 
         {SIZES.map((size, si) => {
@@ -457,35 +466,31 @@ function RejectsRepairsSection({ rejectGowns, onReject, buildings, allocPcts, on
         )}
       </div>
 
-      {/* Auto-allocation preview */}
-      {hasAny && buildings.length > 0 && (
+      {/* Repair allocation preview — only repairs are split across buildings */}
+      {grandTotals.repair > 0 && buildings.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Auto-allocated to buildings
+            Repair allocation to buildings
           </p>
           {buildings.map(b => {
-            const pct  = (allocPcts[b.id] || 0) / 100
-            const ink  = Math.round(grandTotals.ink    * pct)
-            const holes= Math.round(grandTotals.holes  * pct)
-            const rep  = Math.round(grandTotals.repair * pct)
-            if (!ink && !holes && !rep) return null
+            const pct = (allocPcts[b.id] || 0) / 100
+            const rep = Math.round(grandTotals.repair * pct)
+            if (!rep) return null
             return (
-              <div key={b.id} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+              <div key={b.id} className="flex items-center gap-3 bg-amber-50 rounded-xl px-3 py-2.5 border border-amber-100">
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-gray-800">{b.name}</p>
                   <p className="text-xs text-gray-400">{allocPcts[b.id] || 0}% allocation</p>
                 </div>
                 <div className="flex gap-3 text-xs font-semibold">
-                  {ink   > 0 && <span className="text-red-600">{ink} ink</span>}
-                  {holes > 0 && <span className="text-orange-600">{holes} holes</span>}
-                  {rep   > 0 && <span className="text-amber-600">{rep} repairs</span>}
+                  <span className="text-amber-700">{rep} repairs</span>
                 </div>
               </div>
             )
           })}
           {!allocValid && (
             <p className="text-xs text-red-500 text-center">
-              ⚠ Allocation % must total 100% before submitting
+              ⚠ Repair allocation % must total 100% before submitting
             </p>
           )}
         </div>
@@ -762,13 +767,15 @@ export default function StaffNewEntry() {
     mutationFn: async () => {
       if (!clientId) throw new Error('Select a client')
 
-      if (!allocValid && (grandRejects.ink > 0 || grandRejects.holes > 0 || grandRejects.repair > 0)) {
-        throw new Error('Allocation percentages must total 100% before submitting rejects/repairs')
+      if (!allocValid && grandRejects.repair > 0) {
+        throw new Error('Allocation percentages must total 100% before submitting repairs')
       }
 
       for (const b of buildings) {
-        const bid  = b.id
-        const pct  = (allocPcts[bid] || 0) / 100
+        const bid     = b.id
+        const pct     = (allocPcts[bid] || 0) / 100
+        // Ink stain & large holes are global site-wide totals — stored on the first building only
+        const isFirst = bid === buildings[0].id
         const rowData = SIZES.map((size, i) => {
           const r  = (gowns[bid] || {})[size] || emptyGownRow()
           const rj = rejectGowns[size]        || emptyRejectRow()
@@ -779,9 +786,10 @@ export default function StaffNewEntry() {
             white_gowns: +r.white || 0,
             grey_gowns:  +r.grey  || 0,
             qty_packed:  (+r.blue || 0) + (+r.white || 0) + (+r.grey || 0),
-            // Global reject/repair total × this building's allocation share
-            ink_stain:   Math.round((+rj.ink    || 0) * pct),
-            large_holes: Math.round((+rj.holes  || 0) * pct),
+            // Ink stain & holes are global totals — only written to the first/primary building
+            ink_stain:   isFirst ? (+rj.ink   || 0) : 0,
+            large_holes: isFirst ? (+rj.holes || 0) : 0,
+            // Repairs are split across buildings by the configured allocation %
             to_repair:   Math.round((+rj.repair || 0) * pct),
           }
         }).filter(r => r.qty_packed || r.ink_stain || r.large_holes || r.to_repair)

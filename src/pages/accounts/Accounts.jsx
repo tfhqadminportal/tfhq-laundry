@@ -136,6 +136,7 @@ function ProcessingLog() {
   })
 
   const { data: clients = [] }                       = useClients()
+  const { data: buildings = [] }                     = useBuildings(filters.client)
   const { data: logs = [], isLoading, error }        = useProcessingLogs(filters)
   const { data: extras = [] }                        = useDailyExtras(filters)
 
@@ -189,6 +190,18 @@ function ProcessingLog() {
     })
     return t
   }, [weeklyGroups])
+
+  // ── Extras grouped by ISO week (for per-building split) ───
+  const weekExtras = useMemo(() => {
+    const t = {}
+    extras.forEach(e => {
+      const wk = getISOWeek(parseISO(e.log_date))
+      if (!t[wk]) t[wk] = { labelling: 0, general: 0 }
+      t[wk].labelling += e.labelling      || 0
+      t[wk].general   += e.general_repair || 0
+    })
+    return t
+  }, [extras])
 
   // ── Grand total ────────────────────────────────────────────
   const grand = useMemo(() => byDate.reduce((acc, d) => {
@@ -362,6 +375,56 @@ function ProcessingLog() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* ── Labelling & General Repair split by building allocation % ── */}
+                {filters.client && buildings.length > 0 &&
+                  (weekExtras[wk]?.labelling > 0 || weekExtras[wk]?.general > 0) && (
+                  <div className="border-t border-amber-200 bg-amber-50/50 px-5 py-3">
+                    <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">
+                      Labelling &amp; General Repair — Building Split
+                    </p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {weekExtras[wk]?.labelling > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1.5">
+                            Garment Labelling <span className="font-semibold text-gray-700">({weekExtras[wk].labelling} total)</span>
+                          </p>
+                          <div className="space-y-1">
+                            {buildings.map(b => {
+                              const qty = Math.ceil(weekExtras[wk].labelling * ((b.reject_pct || 0) / 100))
+                              if (!qty) return null
+                              return (
+                                <div key={b.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5 border border-amber-100">
+                                  <span className="text-gray-600">{b.name} <span className="text-gray-400">({b.reject_pct}%)</span></span>
+                                  <span className="font-bold text-amber-700">{qty}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {weekExtras[wk]?.general > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1.5">
+                            General Repair <span className="font-semibold text-gray-700">({weekExtras[wk].general} total)</span>
+                          </p>
+                          <div className="space-y-1">
+                            {buildings.map(b => {
+                              const qty = Math.ceil(weekExtras[wk].general * ((b.reject_pct || 0) / 100))
+                              if (!qty) return null
+                              return (
+                                <div key={b.id} className="flex items-center justify-between text-xs bg-white rounded-lg px-3 py-1.5 border border-amber-100">
+                                  <span className="text-gray-600">{b.name} <span className="text-gray-400">({b.reject_pct}%)</span></span>
+                                  <span className="font-bold text-amber-700">{qty}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}
