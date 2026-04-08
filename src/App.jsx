@@ -10,6 +10,7 @@ import AdminLogs from '@/pages/admin/Logs'
 import AdminLogDetail from '@/pages/admin/LogDetail'
 import AdminReports from '@/pages/admin/Reports'
 import StaffNewEntry from '@/pages/staff/NewEntry'
+import StaffWeeklyUpload from '@/pages/staff/WeeklyUpload'
 import StaffHistory from '@/pages/staff/History'
 import Accounts from '@/pages/accounts/Accounts'
 
@@ -84,7 +85,10 @@ export default function App() {
         <Route index element={<DefaultRedirect />} />
 
         {/* Staff Routes */}
-        <Route path="log/new"     element={<StaffNewEntry />} />
+        {/* Default /log/new is now the weekly photo upload flow.
+            The old per-day manual form stays reachable at /log/manual for admins. */}
+        <Route path="log/new"     element={<StaffWeeklyUpload />} />
+        <Route path="log/manual"  element={<StaffNewEntry />} />
         <Route path="log/history" element={<StaffHistory />} />
 
         {/* Admin Routes */}
