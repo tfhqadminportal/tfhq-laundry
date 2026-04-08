@@ -1,7 +1,8 @@
 // ============================================================
 // TFHQ Laundry — OCR endpoint (Vercel serverless function)
-// Accepts a base64 image of the weekly handwritten log sheet
-// and returns structured JSON using Claude Vision.
+// Reads a photo of the existing handwritten weekly Gown
+// Processing Log and returns structured JSON that maps 1:1 to
+// the columns in the user's existing Excel sheets.
 // ============================================================
 //
 // Expects env var: ANTHROPIC_API_KEY
@@ -13,23 +14,24 @@
 //   {
 //     days: [
 //       {
-//         date_label: "30/3",
+//         date_label: "Monday" | "30/3" | "Mon 30-3",
 //         sizes: {
-//           "XS": {
-//             paykel:  { blue: 0, white: 61, grey: 0 },
-//             daniel:  { blue: 0, white: 15, grey: 0 },
-//             stewart: { blue: 0, white: 180, grey: 0 },
-//             ink_stain: 1, large_holes: 0, to_repair: 0
-//           },
-//           ...
+//           "XS":  { paykel: 0, daniel: 0, stewart: 0, ink_stain: 0, large_holes: 0, to_repair: 0 },
+//           "M":   { ... },
+//           "XL":  { ... },
+//           "3XL": { ... },
+//           "5XL": { ... },
+//           "7XL": { ... },
+//           "9XL": { ... }
 //         }
-//       },
-//       ...
+//       }
 //     ],
 //     weekly: {
-//       bag_counts:    { paykel: 45, daniel: 45, stewart: 130 },
-//       total_labelled: 427,
-//       total_gowns:    6636
+//       bag_counts:    { paykel: 0, daniel: 0, stewart: 0 },
+//       labelling:     0,
+//       sleeve_repair: 0,
+//       general_repair:0,
+//       fp_inject:     0
 //     },
 //     confidence: "high" | "medium" | "low",
 //     notes: "any uncertainties from the model"
@@ -37,73 +39,71 @@
 
 export const config = { runtime: 'nodejs', maxDuration: 60 }
 
-const SIZES   = ['XS', 'M', 'XL', '3XL', '5XL', '7XL', '9XL']
-const COLOURS = ['blue', 'white', 'grey']
+const SIZES     = ['XS', 'M', 'XL', '3XL', '5XL', '7XL', '9XL']
 const BUILDINGS = ['paykel', 'daniel', 'stewart']
 
-const SYSTEM_PROMPT = `You are an OCR specialist that extracts structured data from handwritten laundry log sheets.
+const SYSTEM_PROMPT = `You are an OCR specialist that extracts structured data from a handwritten weekly "Gown Processing Log" for a laundry business.
 
-SHEET LAYOUT (what you will see):
-- One page containing several daily tables (typically 4 or 5, one per weekday).
-- Each daily table has a day label (e.g. "Monday" / "30/3" / "Mon 30-3").
-- Rows = gown sizes in this exact order: XS, M, XL, 3XL, 5XL, 7XL, 9XL.
-- Columns per day table (13 columns total):
-    1.  Size
-    2-4. PAYKEL  (Blue, White, Grey)
-    5-7. DANIEL  (Blue, White, Grey)
-    8-10. STEWART (Blue, White, Grey)
-    11. Ink Stain  (reject, per size, not per building)
-    12. Large Holes (reject)
-    13. To Repair   (reject)
-- An optional Totals row at the bottom of each day table (ignore — don't return it).
+SHEET LAYOUT (what you will see in the photo):
+- One A4 page printed in portrait, containing 4 or 5 daily tables stacked top-to-bottom (one table per weekday — sometimes only 4 days are filled because of public holidays).
+- Every daily table has the same 7 columns in this exact left-to-right order:
+    1. Size
+    2. Paykel
+    3. Daniel
+    4. Stewart
+    5. Ink Stain
+    6. Large Holes
+    7. To Repair
+- Every daily table has 7 size rows in this exact top-to-bottom order: XS, M, XL, 3XL, 5XL, 7XL, 9XL.
+- Each daily table also has a "Totals" row at the bottom — IGNORE that totals row, do NOT return it.
+- The day's date is usually written near the top of the table (e.g. "Monday", "Mon 30/3", "30-3", or just "Monday 30/3"). Capture whatever you see in "date_label" verbatim.
 
-BACKWARDS COMPATIBILITY: Older sheets may have only ONE column per building (no blue/white/grey split). In that case put the whole number in the "white" bucket and leave blue and grey at 0.
+WEEKLY EXTRAS (usually written below the daily tables, on the same page or next to them):
+- "Paykel bags" / "Paykel black bags"   - integer
+- "Daniel bags" / "Daniel red bags"     - integer
+- "Stewart bags" / "Stewart blue bags"  - integer
+- "Labelling" / "Total labelled"        - integer
+- "Sleeve repair"                       - integer (optional)
+- "General repair"                      - integer (optional)
+- "Fisher & Paykel to inject" / "FP inject" - integer (optional)
 
-WEEKLY TOTALS (at the bottom of the page):
-- "Paykel bags" (or "Paykel black bags") - integer
-- "Daniel bags" (or "Daniel red bags")   - integer
-- "Stewart bags" (or "Stewart blue bags") - integer
-- "Total labelled" - integer
-- "Total" or "Total gowns" - integer (all sizes × buildings × colours for the whole week)
-
-OUTPUT: return ONLY valid JSON (no markdown, no preamble) with this exact shape:
+OUTPUT: return ONLY valid raw JSON (no markdown fences, no preamble, no commentary) with this exact shape:
 
 {
   "days": [
     {
       "date_label": "Monday",
       "sizes": {
-        "XS": {
-          "paykel":  { "blue": 0, "white": 61, "grey": 0 },
-          "daniel":  { "blue": 0, "white": 15, "grey": 0 },
-          "stewart": { "blue": 0, "white": 180, "grey": 0 },
-          "ink_stain": 1, "large_holes": 0, "to_repair": 0
-        },
-        "M":  { "paykel":  { "blue": 0, "white": 185, "grey": 0 }, "daniel":  { "blue": 0, "white": 41, "grey": 0 }, "stewart": { "blue": 0, "white": 336, "grey": 0 }, "ink_stain": 1, "large_holes": 0, "to_repair": 0 },
-        "XL": { "paykel":  { "blue": 0, "white": 186, "grey": 0 }, "daniel":  { "blue": 0, "white": 43, "grey": 0 }, "stewart": { "blue": 0, "white": 317, "grey": 0 }, "ink_stain": 2, "large_holes": 0, "to_repair": 2 },
-        "3XL": { "paykel": { "blue": 0, "white": 155, "grey": 0 }, "daniel":  { "blue": 0, "white": 37, "grey": 0 }, "stewart": { "blue": 0, "white": 244, "grey": 0 }, "ink_stain": 2, "large_holes": 0, "to_repair": 2 },
-        "5XL": { "paykel": { "blue": 0, "white": 87,  "grey": 0 }, "daniel":  { "blue": 0, "white": 17, "grey": 0 }, "stewart": { "blue": 0, "white": 199, "grey": 0 }, "ink_stain": 4, "large_holes": 0, "to_repair": 1 },
-        "7XL": { "paykel": { "blue": 0, "white": 93,  "grey": 0 }, "daniel":  { "blue": 0, "white": 19, "grey": 0 }, "stewart": { "blue": 0, "white": 171, "grey": 0 }, "ink_stain": 5, "large_holes": 0, "to_repair": 2 },
-        "9XL": { "paykel": { "blue": 0, "white": 0,   "grey": 0 }, "daniel":  { "blue": 0, "white": 0,  "grey": 0 }, "stewart": { "blue": 0, "white": 0,   "grey": 0 }, "ink_stain": 0, "large_holes": 0, "to_repair": 0 }
+        "XS":  { "paykel": 61, "daniel": 15, "stewart": 180, "ink_stain": 1, "large_holes": 0, "to_repair": 0 },
+        "M":   { "paykel": 185,"daniel": 41, "stewart": 336, "ink_stain": 1, "large_holes": 0, "to_repair": 0 },
+        "XL":  { "paykel": 186,"daniel": 43, "stewart": 317, "ink_stain": 2, "large_holes": 0, "to_repair": 2 },
+        "3XL": { "paykel": 155,"daniel": 37, "stewart": 244, "ink_stain": 2, "large_holes": 0, "to_repair": 2 },
+        "5XL": { "paykel": 87, "daniel": 17, "stewart": 199, "ink_stain": 4, "large_holes": 0, "to_repair": 1 },
+        "7XL": { "paykel": 93, "daniel": 19, "stewart": 171, "ink_stain": 5, "large_holes": 0, "to_repair": 2 },
+        "9XL": { "paykel": 0,  "daniel": 0,  "stewart": 0,   "ink_stain": 0, "large_holes": 0, "to_repair": 0 }
       }
     }
   ],
   "weekly": {
-    "bag_counts":    { "paykel": 45, "daniel": 45, "stewart": 130 },
-    "total_labelled": 427,
-    "total_gowns":    6636
+    "bag_counts":     { "paykel": 45, "daniel": 45, "stewart": 130 },
+    "labelling":      427,
+    "sleeve_repair":  0,
+    "general_repair": 0,
+    "fp_inject":      0
   },
   "confidence": "high",
   "notes": "Row 9XL was blank on every day."
 }
 
 RULES:
-- Empty cells = 0. Blanks and dashes both count as 0.
-- Always include all 7 sizes in every day object (XS, M, XL, 3XL, 5XL, 7XL, 9XL).
-- Always include all 3 buildings (paykel, daniel, stewart) with all 3 colours (blue, white, grey) in every size object.
-- date_label stays in the format you see on the sheet. Do NOT invent a year.
-- If handwriting is ambiguous, pick your best guess and list the uncertainty in "notes".
-- Do NOT wrap the JSON in code fences. Output raw JSON only.`
+- Empty cells, blanks, dashes ("-"), and "x" all count as 0.
+- Always include all 7 sizes (XS, M, XL, 3XL, 5XL, 7XL, 9XL) in every day, even if the row is empty.
+- Always include all 3 buildings (paykel, daniel, stewart) plus ink_stain, large_holes, to_repair in every size row.
+- Return one entry per filled-in day under "days" — do NOT pad with empty days.
+- date_label stays in the format you see on the sheet. Do NOT invent a year or guess the day name.
+- If a number is genuinely unreadable, pick your best guess and add a short note in "notes" describing which cell.
+- All numbers must be non-negative integers.
+- Output raw JSON only — no markdown fences, no preamble.`
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -151,7 +151,7 @@ export default async function handler(req, res) {
             role: 'user',
             content: [
               { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-              { type: 'text',  text: 'Extract every daily table from this laundry sheet and return the JSON described in the system prompt. Output raw JSON only.' },
+              { type: 'text',  text: 'Extract every filled-in daily table from this Gown Processing Log photo and return the JSON described in the system prompt. Output raw JSON only — no markdown.' },
             ],
           },
         ],
@@ -179,29 +179,18 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: 'Claude did not return valid JSON.', raw: raw.slice(0, 500) })
     }
 
-    // Normalise every cell so the front-end can rely on a fixed shape
+    // Normalise every cell so the front-end can rely on a fixed shape.
     const days = (parsed.days || []).map(d => {
       const sizes = {}
       for (const s of SIZES) {
         const cell = (d.sizes || {})[s] || {}
-        const out  = {
+        const out = {
           ink_stain:   toInt(cell.ink_stain),
           large_holes: toInt(cell.large_holes),
           to_repair:   toInt(cell.to_repair),
         }
         for (const b of BUILDINGS) {
-          const bc = cell[b] || {}
-          // Back-compat: if the OCR only returned a plain number for a building,
-          // put the whole count into the "white" bucket.
-          if (typeof bc === 'number') {
-            out[b] = { blue: 0, white: toInt(bc), grey: 0 }
-          } else {
-            out[b] = {
-              blue:  toInt(bc.blue),
-              white: toInt(bc.white),
-              grey:  toInt(bc.grey),
-            }
-          }
+          out[b] = toInt(cell[b])
         }
         sizes[s] = out
       }
@@ -219,11 +208,13 @@ export default async function handler(req, res) {
           daniel:  toInt(bagCounts.daniel),
           stewart: toInt(bagCounts.stewart),
         },
-        total_labelled: toInt(weekly.total_labelled),
-        total_gowns:    toInt(weekly.total_gowns),
+        labelling:      toInt(weekly.labelling ?? weekly.total_labelled),
+        sleeve_repair:  toInt(weekly.sleeve_repair),
+        general_repair: toInt(weekly.general_repair),
+        fp_inject:      toInt(weekly.fp_inject),
       },
       confidence: parsed.confidence || 'medium',
-      notes:      parsed.notes || '',
+      notes:      parsed.notes      || '',
     })
   } catch (err) {
     console.error('OCR handler crashed:', err)
@@ -233,5 +224,5 @@ export default async function handler(req, res) {
 
 function toInt(v) {
   const n = parseInt(v, 10)
-  return Number.isFinite(n) ? n : 0
+  return Number.isFinite(n) && n >= 0 ? n : 0
 }

@@ -2,8 +2,8 @@ import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { format, startOfWeek, endOfWeek, parseISO } from 'date-fns'
-import { FileDown } from 'lucide-react'
-import * as XLSX from 'xlsx'
+import { FileDown, Loader2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 const SIZES = ['XS', 'M', 'XL', '3XL', '5XL', '7XL', '9XL']
 
@@ -226,18 +226,16 @@ function DayBlock({ date, dayData, buildings }) {
             const s = dayData[size] || { packed: {}, ink: 0, holes: 0, repair: 0 }
             const bPacked = buildings.map(b => s.packed[b.id] || 0)
             const totalP  = bPacked.reduce((a, v) => a + v, 0)
-            const hasData = totalP > 0 || s.ink > 0 || s.holes > 0 || s.repair > 0
-            if (!hasData) return null
             return (
               <tr key={size} className={si % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                 <td className="px-2 py-1 border border-gray-200 font-semibold text-navy-700">{size}</td>
-                <td className="px-2 py-1 border border-gray-200 text-right font-semibold">{totalP || '—'}</td>
+                <td className="px-2 py-1 border border-gray-200 text-right font-semibold text-navy-700">{totalP || 0}</td>
                 {buildings.map((b, bi) => (
-                  <td key={b.id} className="px-2 py-1 border border-gray-200 text-right">{bPacked[bi] || '—'}</td>
+                  <td key={b.id} className="px-2 py-1 border border-gray-200 text-right">{bPacked[bi] || 0}</td>
                 ))}
-                <td className="px-2 py-1 border border-gray-200 text-right text-red-600">{s.ink || '—'}</td>
-                <td className="px-2 py-1 border border-gray-200 text-right text-orange-600">{s.holes || '—'}</td>
-                <td className="px-2 py-1 border border-gray-200 text-right text-amber-600">{s.repair || '—'}</td>
+                <td className="px-2 py-1 border border-gray-200 text-right text-red-600">{s.ink || 0}</td>
+                <td className="px-2 py-1 border border-gray-200 text-right text-orange-600">{s.holes || 0}</td>
+                <td className="px-2 py-1 border border-gray-200 text-right text-amber-600">{s.repair || 0}</td>
               </tr>
             )
           })}
@@ -312,10 +310,85 @@ export default function WeeklyReport() {
   }, [extras, buildings, weeklyTot.repair, weeklyTot.ink, weeklyTot.holes])
 
   const clientName = clients.find(c => c.id === clientId)?.name || ''
+  const [exporting, setExporting] = useState(false)
 
-  const handleExport = () => {
+  // Build a payload matching WeeklyUpload shape and call the server-side xlsx generator
+  // so the download is byte-for-byte identical to what staff upload produces.
+  const handleExport = async () => {
     if (!clientId || !dates.length) return
-    exportExcel(dates, dayDataMap, buildings, extras, clientName, weeklyTot)
+    setExporting(true)
+    try {
+      // Build "days" array in the same shape that /api/build-weekly-xlsx expects
+      const days = dates.slice(0, 5).map(date => {
+        const dayData = dayDataMap[date] || {}
+        const sizes = {}
+        SIZES.forEach(size => {
+          const s = dayData[size] || { packed: {}, ink: 0, holes: 0, repair: 0 }
+          const row = { ink_stain: s.ink || 0, large_holes: s.holes || 0, to_repair: s.repair || 0 }
+          buildings.forEach(b => {
+            const bName = (b.name || '').toLowerCase().trim()
+            if (['paykel','fisher paykel','fisher & paykel','fisher and paykel'].includes(bName)) {
+              row.paykel  = s.packed[b.id] || 0
+            } else if (bName === 'daniel') {
+              row.daniel  = s.packed[b.id] || 0
+            } else if (bName === 'stewart') {
+              row.stewart = s.packed[b.id] || 0
+            }
+          })
+          row.paykel  = row.paykel  || 0
+          row.daniel  = row.daniel  || 0
+          row.stewart = row.stewart || 0
+          sizes[size] = row
+        })
+        return { date, date_label: format(parseISO(date), 'd/M'), sizes }
+      })
+
+      const weeklyPayload = {
+        bag_counts: {
+          paykel:  0,
+          daniel:  0,
+          stewart: 0,
+        },
+        labelling:      extTot.labelling || 0,
+        sleeve_repair:  extTot.sleeve    || 0,
+        general_repair: extTot.general   || 0,
+        fp_inject:      extTot.fp        || 0,
+      }
+      // Pull actual bag counts from extras
+      extras.forEach(e => {
+        const bc = e.bag_counts || {}
+        buildings.forEach(b => {
+          const bName = (b.name || '').toLowerCase().trim()
+          const cnt   = bc[b.id] || 0
+          if (['paykel','fisher paykel'].includes(bName)) weeklyPayload.bag_counts.paykel  += cnt
+          else if (bName === 'daniel')                    weeklyPayload.bag_counts.daniel  += cnt
+          else if (bName === 'stewart')                   weeklyPayload.bag_counts.stewart += cnt
+        })
+      })
+
+      const weekStart = dates[0]
+      const res = await fetch('/api/build-weekly-xlsx', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ weekStart, days, weekly: weeklyPayload }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed' }))
+        throw new Error(err.error || 'Download failed')
+      }
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `TFHQ-Laundry-${clientName.replace(/\s+/g,'-')}-${weekStart}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Downloaded!')
+    } catch (err) {
+      toast.error(err.message || 'Export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -342,10 +415,12 @@ export default function WeeklyReport() {
           <div className="flex items-end gap-2">
             <button
               onClick={handleExport}
-              disabled={!clientId || !dates.length}
+              disabled={!clientId || !dates.length || exporting}
               className="btn-primary flex items-center gap-2 w-full justify-center disabled:opacity-40"
             >
-              <FileDown size={15} /> Export Excel
+              {exporting
+                ? <><Loader2 size={15} className="animate-spin" /> Downloading…</>
+                : <><FileDown size={15} /> Download Excel</>}
             </button>
           </div>
         </div>
@@ -432,8 +507,8 @@ export default function WeeklyReport() {
             </div>
           </div>
 
-          {/* ── Bags + Extras section ── */}
-          {(extTot.labelling > 0 || extTot.sleeve > 0 || extTot.general > 0 || extTot.fp > 0 || buildings.some(b => extTot.bags[b.id] > 0)) && (
+          {/* ── Bags + Extras section — always shown, matches rows 49–56 of the March/April xlsx ── */}
+          {true && (
             <div className="card overflow-hidden">
               <div className="bg-amber-700 text-white px-4 py-2.5 font-bold text-sm">
                 Bags, Labelling &amp; Process — Weekly Summary
